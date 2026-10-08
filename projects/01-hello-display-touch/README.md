@@ -8,10 +8,9 @@
 3. Detects the GT911 and prints its address.
 4. Finger-paint screen. Tap **CLR** (top right) to clear. Coordinates are shown bottom-left and printed to serial.
 
-**Run**
-```sh
-~/.platformio/penv/Scripts/pio run -t upload
-~/.platformio/penv/Scripts/pio device monitor
+**Run** (PowerShell at the repo root, not Git Bash)
+```powershell
+.\tools\pio.ps1 -Project 01-hello-display-touch -Action all
 ```
 
-**Status:** builds; not yet tested on hardware.
+**Status:** `builds` (not yet run on hardware)

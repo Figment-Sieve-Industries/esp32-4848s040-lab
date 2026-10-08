@@ -1,5 +1,11 @@
 .pio/
-.vscode/
+__pycache__/
+
+# VS Code: share only extension recommendations
+**/.vscode/*
+!**/.vscode/extensions.json
+
+# Firmware images: ignored except docs and firmware/ (backups are committed on purpose)
 *.bin
 !docs/**/*.bin
-__pycache__/
+!firmware/**/*.bin

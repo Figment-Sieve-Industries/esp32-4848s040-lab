@@ -20,11 +20,11 @@ static void drawHeader() {
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.printf("\nPSRAM: %u bytes free\n", ESP.getFreePsram());
+    Serial.printf("\nPSRAM: %lu bytes free\n", (unsigned long)ESP.getFreePsram());
 
     gfx = board4848::initDisplay();
     if (!gfx) {
-        Serial.println("Display init failed");
+        Serial.println("Display init failed (PSRAM missing? check memory_type = qio_opi)");
         while (true) delay(1000);
     }
     board4848::setBacklight(255);
@@ -47,7 +47,7 @@ void setup() {
 
 void loop() {
     board4848::TouchPoint p;
-    if (touch.read(&p, 1)) {
+    if (touch.read(&p, 1) > 0) {
         if (p.y < 40 && p.x >= 400) {
             gfx->fillScreen(RGB565_BLACK);
             drawHeader();

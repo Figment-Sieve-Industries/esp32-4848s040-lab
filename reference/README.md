@@ -1,6 +1,8 @@
 # Reference: prior art (git submodules, read-only)
 
 Shallow submodules. Don't edit them; copy what you need into `common/` or a project.
+
+**Removed:** `rzeldent/platformio-espressif32-sunton` (139 MB) is no longer a submodule. We used only two of its files: the board JSONs are now in [`../common/boards/`](../common/boards/), and its datasheets and photos are in [`../docs/datasheets/`](../docs/datasheets/) and [`../docs/images/`](../docs/images/). Upstream: https://github.com/rzeldent/platformio-espressif32-sunton
 `git submodule update --init` fetches them; `git submodule update --remote` updates them.
 Personal project: licences aren't a concern, so copy freely from any of these.
 
@@ -8,12 +10,18 @@ Personal project: licences aren't a concern, so copy freely from any of these.
 
 | Folder | Upstream | Licence | Stack | Why it's useful |
 |---|---|---|---|---|
-| `platformio-espressif32-sunton` | [rzeldent/platformio-espressif32-sunton](https://github.com/rzeldent/platformio-espressif32-sunton) | – | PlatformIO board JSONs | Board definitions `esp32-4848S040CIY1/CIY3`, datasheets, photos |
 | `esp32-smartdisplay` | [rzeldent/esp32-smartdisplay](https://github.com/rzeldent/esp32-smartdisplay) | GPL-3.0 | Arduino + LVGL 9 + esp_lcd | ~700★, actively maintained. One LVGL abstraction for all Sunton boards: display, touch, backlight, RGB LED, light sensor. Good **architecture reference** for a board HAL, and the quickest LVGL route. |
-| `esp32-4848s040-st7701` | [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701) | – | Arduino_GFX | ST7701 init table verified on hardware (used in our `common/` lib) |
-| `ESP32-4848S040-LVGL-LGFX` | [joevial/ESP32-4848S040-LVGL-LGFX](https://github.com/joevial/ESP32-4848S040-LVGL-LGFX) | none stated | pioarduino + **LovyanGFX** + LVGL + **EEZ Studio** | Closest to our stack. Reference for an EEZ Studio UI-designer workflow, LovyanGFX (faster than Arduino_GFX, reported 200+ fps), a backlight coil-whine fix, a backlight-dimming hardware mod, and a 2nd I2C bus on GPIO1/40. |
+| `esp32-4848s040-st7701` | [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701) | – | Arduino_GFX | ST7701 init table verified on hardware by its author (used in our `common/` lib; byte-identical to Arduino_GFX `st7701_type9`) |
+| `ESP32-4848S040-LVGL-LGFX` | [joevial/ESP32-4848S040-LVGL-LGFX](https://github.com/joevial/ESP32-4848S040-LVGL-LGFX) | – | pioarduino + **LovyanGFX** + LVGL + **EEZ Studio** | Closest to our stack. Reference for an EEZ Studio UI-designer workflow, LovyanGFX (faster than Arduino_GFX, reported 200+ fps), a backlight coil-whine fix, a backlight-dimming hardware mod, and a 2nd I2C bus on GPIO1/40. |
 | `Guition-ESP32-S3-4848S040` | [alaltitov/Guition-ESP32-S3-4848S040](https://github.com/alaltitov/Guition-ESP32-S3-4848S040) | MIT | **ESPHome** + LVGL 8.4 | ~440★, the most popular firmware for this board. A full Home Assistant wall panel: climate, lights, media, weather, multi-language. Prior art for a HA panel UI and YAML layout. Docs: [alaltitov/…-DOCS](https://github.com/alaltitov/Guition-ESP32-S3-4848S040-DOCS) |
 | `ESP32-4848S040-First-Start` | [abcbbck-png/ESP32-4848S040-First-Start](https://github.com/abcbbck-png/ESP32-4848S040-First-Start) | MIT | **ESP-IDF** (CMake + sdkconfig) + LVGL | Starter for the native ESP-IDF route: `sdkconfig.defaults`, partitions and `esp_lcd` setup |
+
+## Knowledge already extracted into docs
+- Display timing variants (ours, openHASP, joevial, rzeldent, ESPHome, First-Start's zero-porch drift note): [docs/04](../docs/04-display-st7701.md#timing-variants-seen-in-the-wild)
+- Second I2C bus on GPIO1/40 and joevial's backlight hardware mod (R12 5.1 Ω → 33 Ω, ~80 nF FB→GND, FB to GPIO2): [docs/02](../docs/02-pinout.md)
+- Backlight 100 kHz PWM and the ~100/255 minimum (joevial): [docs/07](../docs/07-gotchas.md)
+- GT911 INT→address mapping (smartdisplay and joevial have it backwards): [docs/05](../docs/05-touch-gt911.md)
+- ESPHome screen-off / LVGL pause pattern (alaltitov): [docs/08](../docs/08-power-battery-sleep.md)
 
 ## Snippets (`snippets/`)
 | File | From |

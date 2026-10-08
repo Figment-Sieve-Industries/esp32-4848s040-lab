@@ -50,15 +50,38 @@ This section lays out the trade-offs. No decision has been made; `projects/` cur
 - Reusing existing Arduino code for this board
 
 ## 1. PlatformIO + Arduino (used in `projects/`)
-- Platform: **pioarduino** (`platform-espressif32` fork with Arduino core 3.x). The official PlatformIO espressif32 platform is stuck on core 2.x, and Arduino_GFX 1.6.x needs 3.x.
-- Board: `esp32-s3-devkitc-1` with `qio_opi`, 16 MB flash. Alternatively, use rzeldent's ready-made board JSONs (`reference/platformio-espressif32-sunton`, `esp32-4848S040CIY1`/`CIY3`) by putting that repo in the project's `boards/` folder.
-- Graphics: **[Arduino_GFX](https://github.com/moononournation/Arduino_GFX)** (`moononournation/GFX Library for Arduino`). It has `Arduino_ESP32RGBPanel` + `Arduino_RGB_Display`.
-- Shared code for this repo: `common/lib/Board4848S040`.
+- **Platform:** **pioarduino** (`platform-espressif32` fork with Arduino core 3.x), pinned to release `54.03.21-2` (Arduino core 3.2.1, ESP-IDF 5.4). The official PlatformIO espressif32 platform is stuck on core 2.x, and Arduino_GFX 1.6.x needs 3.x. Newer pioarduino releases need PlatformIO Core ≥ 6.2 (`pio upgrade`).
+- **Shared settings:** all of these live in `common/platformio-base.ini`, section `[base_4848s040]`.
+  - board `esp32-s3-devkitc-1`, `qio_opi`, 16 MB, `default_16MB.csv`
+  - build flags
+  - monitor and upload speed
+  - `monitor_filters = esp32_exception_decoder`
+  - `lib_deps = symlink://../../common/lib/Board4848S040`
+
+  Each project's `platformio.ini` is just:
+  ```ini
+  [platformio]
+  extra_configs = ../../common/platformio-base.ini
+
+  [env:esp32-4848s040]
+  extends = base_4848s040
+  ; add project-specific lib_deps / build_flags here, e.g.
+  ; lib_deps = ${base_4848s040.lib_deps}
+  ;     lvgl/lvgl @ 9.5.0
+  ```
+  Projects keep their own `lib/` folder for private libraries.
+- **Pinned versions:** Arduino_GFX is pinned to exactly **1.6.9**, in one place only (`common/lib/Board4848S040/library.json`). LVGL is pinned per project (02 uses **9.5.0**).
+- **Board JSONs (optional):** rzeldent's `esp32-4848S040CIY1.json` / `CIY3.json` are in `common/boards/`. To use them, set `boards_dir = ../../common/boards` and `board = esp32-4848S040CIY1`. They define `LED_GPIO=16`, which is actually HSYNC, so **don't use that define**.
+- **Graphics:** **[Arduino_GFX](https://github.com/moononournation/Arduino_GFX)** (`moononournation/GFX Library for Arduino`), via `Arduino_ESP32RGBPanel` + `Arduino_RGB_Display`. **LovyanGFX** is a faster alternative with a built-in `Panel_ST7701_guition_esp32_4848S040` and `Touch_GT911`; see `reference/ESP32-4848S040-LVGL-LGFX/src/monolith.cpp`.
+- **Shared library:** `common/lib/Board4848S040`.
+  - `initDisplay()`, `setBacklight()`
+  - `Touch` (GT911, with `setRotation`)
+  - `lvglBegin()` in `Board4848S040_lvgl.h`, compiled only when LVGL is present
 
 ## 2. LVGL (rich UIs)
 - LVGL 9.x on top of Arduino_GFX (flush with `gfx->draw16bitRGBBitmap`), or on top of `esp_lcd` in ESP-IDF.
-- **[esp32-smartdisplay](https://github.com/rzeldent/esp32-smartdisplay)** (rzeldent) wraps LVGL, display, touch and backlight for all Sunton boards, including the 4848S040. It is the fastest way to get LVGL running. Use it together with the board JSONs above.
-- **SquareLine Studio** or **EEZ Studio** for drag-and-drop UI design. Export LVGL code into a project.
+- **[esp32-smartdisplay](https://github.com/rzeldent/esp32-smartdisplay)** (rzeldent) wraps LVGL, display, touch and backlight for all Sunton boards, including the 4848S040. It is the fastest way to get LVGL running. Use it together with the board JSONs in `common/boards/`. Our own `board4848::lvglBegin()` is the lighter in-repo equivalent.
+- **SquareLine Studio** or **EEZ Studio** for drag-and-drop UI design. Export LVGL code into a project. joevial's repo shows the EEZ layout: generated `ui.c` / `screens.c`, with `ui_init()` and `ui_tick()` called from the loop.
 
 ## 3. ESP-IDF (native)
 - Components: `espressif/esp_lcd_st7701` (3-wire SPI + RGB), `espressif/esp_lcd_touch_gt911`, `espressif/esp_lvgl_port`.
@@ -67,7 +90,7 @@ This section lays out the trade-offs. No decision has been made; `projects/` cur
 
 ## 4. ESPHome / Home Assistant (wall panel)
 A ready config is on the ESPHome devices site: https://devices.esphome.io/devices/guition-esp32-s3-4848s040
-It covers the display (`st7701s`), GT911 touch, backlight `light`, the 3 relays as `switch`, and LVGL. This is the easiest path if the screen is meant to be a Home Assistant wall controller.
+It covers the display (`st7701s`), GT911 touch, backlight `light`, the 3 relays as `switch`, and LVGL. Newer ESPHome also offers a shortcut, `display: platform: mipi_rgb` with `model: GUITION-4848S040`. `reference/Guition-ESP32-S3-4848S040/src/main.yaml` has it commented out as an alternative and actually uses `platform: st7701s`. Its touch `on_release` resumes a paused LVGL and turns the backlight back on (the screen-off pattern in [08](08-power-battery-sleep.md)). This is the easiest path if the screen is meant to be a Home Assistant wall controller. Useful extras: `psram` octal at 80 MHz, the sdkconfig options `CONFIG_SPIRAM_FETCH_INSTRUCTIONS` / `CONFIG_SPIRAM_RODATA`, and `ignore_strapping_warning: true` on GPIO45.
 
 ## 5. Others
 - **Tasmota** has universal display support for this board (via a DisplayConfig descriptor).

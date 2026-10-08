@@ -5,7 +5,7 @@
 #define LV_COLOR_DEPTH 16
 
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
-#define LV_MEM_SIZE (128 * 1024U)
+#define LV_MEM_SIZE (48 * 1024U) // static internal RAM; raise if widgets fail to allocate
 
 #define LV_DEF_REFR_PERIOD 16
 #define LV_USE_OS LV_OS_NONE

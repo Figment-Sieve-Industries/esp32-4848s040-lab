@@ -1,42 +1,59 @@
 # Display: ST7701S (480×480 RGB)
 
 The ST7701S has **two interfaces**, and both are used:
-1. **3-wire SPI** (CS 39, SCK 48, SDA 47, 9-bit with a D/C bit). It is used only once at boot to send the init sequence: power and gamma registers, then sleep-out and display-on.
+1. **3-wire SPI** (CS 39, SCK 48, SDA 47, 9-bit with a D/C bit). It's used only once at boot to send the init sequence: power and gamma registers, then sleep-out and display-on.
 2. **16-bit RGB565 parallel** (DE/HSYNC/VSYNC/PCLK + 16 data lines). This streams the framebuffer continuously from PSRAM using the ESP32-S3 LCD peripheral (`esp_lcd_panel_rgb`).
 
-No reset pin is wired, so the init sequence must start with a software state that the panel accepts after power-on.
+The LCD reset pin isn't connected to the ESP32. It's on an RC power-on reset (R16/C22) shared with the GT911, so the init sequence runs on a panel that was reset at power-up. Arduino_GFX also sends a software reset over SPI.
 
-## Timings in use (verified by the aquaElectronics project)
+## Timings in use
+The porches and polarities come from aquaElectronics and Arduino_GFX's `ESP32_4848S040_86BOX_GUITION` config, which agree. The PCLK arguments come from the Arduino_GFX config. **This exact combination hasn't been run on hardware here yet.**
+
 | Param | Value |
 |---|---|
-| PCLK | 12 MHz (12.5 MHz in rzeldent; ESPHome uses 12 MHz) |
-| HSYNC pulse / front / back porch | 8 / 10 / 50 |
-| VSYNC pulse / front / back porch | 8 / 10 / 20 |
-| Polarity | hsync 1, vsync 1, PCLK active on the rising edge |
-| Colour | RGB565 bus. The panel is set to `0x3A = 0x60` (RGB666) and the top bits are used. |
+| PCLK | 12 MHz |
+| HSYNC front / pulse / back porch | 10 / 8 / 50 |
+| VSYNC front / pulse / back porch | 10 / 8 / 20 |
+| Polarity | hsync 1, vsync 1, `pclk_active_neg` 0 |
+| Colour | RGB565 on a 16-bit bus. The panel is set to `0x3A = 0x60` (RGB666); it's an 18-bit panel with DB0/DB12 unconnected, so the 16 bits map onto its top bits. |
 
-ESPHome uses a back porch of 20/10, which also works. If you see **drift, shimmer or a rolling image**, adjust the porches or PCLK first. Higher PCLK gives a better frame rate but more PSRAM bandwidth pressure. 12–16 MHz is the safe zone.
+### About the aquaElectronics `12000` argument
+aquaElectronics passes `12000` in the `pclk_active_neg` slot (the argument after the 8 sync values), apparently meaning it as the clock. That field is a **1-bit bitfield** in `esp_lcd_rgb_timing_t`, and 12000 is even, so it **truncates to 0**. The speed falls back to Arduino_GFX's default of 12 MHz. Their effective configuration is therefore **identical** to ours (`0, 12000000`).
 
-> **Watch the `Arduino_ESP32RGBPanel` arguments.** After the 8 sync values come `pclk_active_neg`, then `prefer_speed` in Hz. The aquaElectronics project passes `12000` in the `pclk_active_neg` slot, which inverts the PCLK edge and leaves the default 12 MHz clock. That still works on its author's panel. Our lib follows Arduino_GFX's own `ESP32_4848S040_86BOX_GUITION` config: `0, 12000000`. If you see sparkle or noise on edges, try `pclk_active_neg = 1`.
+### Timing variants seen in the wild
+If you get drift, shimmer or a rolling image, these are the known alternatives:
+
+| Source | PCLK | H porches (front/pulse/back) | V porches | Other |
+|---|---|---|---|---|
+| **Our lib** / Arduino_GFX 86BOX / aquaElectronics | 12 MHz | 10/8/50 | 10/8/20 | `pclk_active_neg` 0 |
+| openHASP (`reference/snippets/openhasp-esp32-s3-4848S040.ini`) | 12 MHz | 10/8/50 | 10/8/20 | `pclk_active_neg` 1 |
+| joevial (LovyanGFX) | 8 MHz | 10/8/50 | 10/8/20 | sync polarity 0, `de_idle_high` 1 |
+| rzeldent board JSON | 12.5 MHz | 10/8/50 | 10/8/20 | `pclk_active_neg` 0 |
+| ESPHome reference YAML (alaltitov) | 12 MHz | (component defaults) | (component defaults) | `pclk_inverted: false` |
+| ESP-IDF First-Start (`board_config.h`, uses `esp_lcd_st7701`) | 15.25 MHz (from a 32 µs line time) | **0**/8/**0** | **0**/8/**0** | Author's note: "any non-zero [front/back] porch causes drift after ~100 cycles; HBP=HFP=VBP=VFP=0 is the only stable configuration". The likely reason is that the ST7701 sets its own VBP/VFP via register C1. Tested with a different init sequence from ours. |
+
+Higher PCLK gives a better frame rate but puts more pressure on PSRAM bandwidth. 8–16 MHz is the safe zone.
 
 ## Init sequence
-The full table is in [`Board4848S040.cpp`](../common/lib/Board4848S040/src/Board4848S040.cpp). It is taken from [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701), whose author notes that "generic ST7701 examples often fail on this panel". Arduino_GFX also ships `st7701_type9_init_operations` for the `ESP32_4848S040_86BOX_GUITION` dev device, which is a good second option if colours or gamma look off.
+The full table is in [`Board4848S040.cpp`](../common/lib/Board4848S040/src/Board4848S040.cpp). It's taken from [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701). It is **byte-identical** to Arduino_GFX's `st7701_type9_init_operations` (used for `ESP32_4848S040_86BOX_GUITION`), except that ours adds a 10 ms delay before Sleep Out. Two independent sources agree on every register value, which gives good confidence in the table.
 
 Structure:
-- `FF 77 01 00 00 10`: command bank 2, page 0. Display line setting (C0/C1/C2), CD, positive/negative gamma (B0/B1)
-- `FF 77 01 00 00 11`: page 1. Voltages (Vop, VCOM, VGH, VGL, AVDD) and GIP timing (E0–ED)
-- `FF 77 01 00 00 13`: VAP/VAN tweak
-- `FF 77 01 00 00 00`: back to the normal command set. `3A` pixel format, `11` sleep out, 120 ms wait, `29` display on
+- `FF 77 01 00 00 10`: command bank 2, page 0. Display line setting (C0/C1/C2); `CD 00` disables MDT (also the key line in ESPHome's init); positive/negative gamma (B0/B1).
+- `FF 77 01 00 00 11`: page 1. Voltages (Vop, VCOM, VGH, VGL, AVDD) and GIP timing (E0–ED).
+- `FF 77 01 00 00 13`: VAP/VAN tweak.
+- `FF 77 01 00 00 00`: back to the normal command set. `3A` pixel format, `11` sleep out, 120 ms wait, `29` display on.
 
 ## Rotation
 Hardware rotation isn't available on an RGB panel. Rotation happens in software:
-- Arduino_GFX: the `rotation` argument to `initDisplay()` (0–3)
-- LVGL: `lv_display_set_rotation()` (needs a rotation buffer or `sw_rotate`)
-- ESPHome: `rotation: 270` or a touchscreen `transform:` (useful when the USB socket points down)
-
-Remember to transform touch coordinates to match the rotation.
+- Arduino_GFX: the `rotation` argument to `board4848::initDisplay()` (0–3). Call `touch.setRotation()` with the same value so touch coordinates match.
+- LVGL 9: `lv_display_set_rotation()`. In partial render mode the flush callback must rotate each area itself (e.g. with `lv_draw_sw_rotate`), or let Arduino_GFX's own rotation handle it.
+- ESPHome: `rotation: 270` or a touchscreen `transform:` (useful when the USB socket points down).
 
 ## Performance tips
 - The framebuffer is 480×480×2 = 460 KB, in PSRAM.
-- With LVGL, use two partial draw buffers in internal RAM, or a full-frame buffer in PSRAM with `direct_mode`. Bounce buffers (`bounce_buffer_size_px`) in `esp_lcd` reduce tearing and PSRAM contention under Wi-Fi load.
-- If the image glitches when Wi-Fi is active, that's PSRAM bandwidth. Lower PCLK or enable bounce buffers.
+- With LVGL, `board4848::lvglBegin()` uses a 48-line partial buffer in internal RAM. Direct mode (rendering into the PSRAM framebuffer) needs `auto_flush=false` or `gfx->flush(true)` for cache writeback.
+- If the image glitches when Wi-Fi is active, that's PSRAM bandwidth contention:
+  1. Try bounce buffers (`bounce_buffer_size_px` in `Arduino_ESP32RGBPanel`, e.g. 480×10).
+  2. Lower PCLK.
+  3. Try the zero front/back porch variant.
+  4. See the sdkconfig options in [06](06-frameworks-and-libraries.md).

@@ -4,7 +4,8 @@
 namespace board4848 {
 
 // ST7701 init sequence for the 4848S040 panel.
-// Taken from aquaElectronics/esp32-4848s040-st7701 (verified on hardware by its author).
+// Byte-identical to aquaElectronics/esp32-4848s040-st7701 and Arduino_GFX st7701_type9_init_operations,
+// plus a 10 ms delay before Sleep Out. CD 00 disables MDT.
 static const uint8_t st7701_4848s040_init_operations[] = {
     BEGIN_WRITE,
     WRITE_COMMAND_8, 0xFF,
@@ -101,9 +102,16 @@ static const uint8_t st7701_4848s040_init_operations[] = {
     END_WRITE};
 
 Arduino_RGB_Display *initDisplay(uint8_t rotation) {
+    // The 480x480x2 framebuffer must fit in PSRAM. Arduino_GFX aborts (ESP_ERROR_CHECK)
+    // rather than returning false if allocation fails, so check up front.
+    if (!psramFound() || ESP.getFreePsram() < (uint32_t)B4848_LCD_WIDTH * B4848_LCD_HEIGHT * 2) {
+        return nullptr;
+    }
+
     Arduino_DataBus *bus = new Arduino_SWSPI(
         GFX_NOT_DEFINED /* DC */, B4848_LCD_CS, B4848_LCD_SCK, B4848_LCD_SDA, GFX_NOT_DEFINED /* MISO */);
 
+    // Same values as Arduino_GFX's ESP32_4848S040_86BOX_GUITION dev-device config.
     Arduino_ESP32RGBPanel *panel = new Arduino_ESP32RGBPanel(
         B4848_LCD_DE, B4848_LCD_VSYNC, B4848_LCD_HSYNC, B4848_LCD_PCLK,
         B4848_LCD_R0, B4848_LCD_R1, B4848_LCD_R2, B4848_LCD_R3, B4848_LCD_R4,
@@ -113,26 +121,29 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation) {
         1 /* vsync_polarity */, 10 /* vsync_front_porch */, 8 /* vsync_pulse_width */, 20 /* vsync_back_porch */,
         0 /* pclk_active_neg */, 12000000 /* prefer_speed (PCLK Hz) */, false /* useBigEndian */,
         0 /* de_idle_high */, 0 /* pclk_idle_high */, 0 /* bounce_buffer_size_px */);
-    // Matches Arduino_GFX's ESP32_4848S040_86BOX_GUITION dev-device config.
 
     Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
         B4848_LCD_WIDTH, B4848_LCD_HEIGHT, panel, rotation, true /* auto_flush */,
         bus, GFX_NOT_DEFINED /* RST */, st7701_4848s040_init_operations, sizeof(st7701_4848s040_init_operations));
 
     if (!gfx->begin()) {
+        delete gfx;
+        delete panel;
+        delete bus;
         return nullptr;
     }
     return gfx;
 }
 
 void setBacklight(uint8_t level) {
-    static bool configured = false;
-    if (!configured) {
-        // 100 kHz PWM avoids audible coil whine from the AP3031 backlight driver.
-        analogWriteFrequency(B4848_LCD_BL, 100000);
-        configured = true;
+    // Attach explicitly: analogWriteFrequency() is ignored on a pin that isn't attached yet
+    // (core 3.x), which left the PWM at 1 kHz. 100 kHz avoids audible coil whine.
+    static bool attached = false;
+    if (!attached) {
+        attached = ledcAttach(B4848_LCD_BL, 100000, 8);
+        if (!attached) return;
     }
-    analogWrite(B4848_LCD_BL, level);
+    ledcWrite(B4848_LCD_BL, level);
 }
 
 // ---------------- GT911 ----------------
@@ -146,19 +157,19 @@ bool Touch::begin() {
     for (uint8_t a : candidates) {
         addr_ = a;
         uint8_t id[4];
-        if (readRegs(GT911_REG_PRODUCT_ID, id, sizeof(id))) {
-            return true; // product id should read "911"
+        if (readRegs(GT911_REG_PRODUCT_ID, id, sizeof(id)) && memcmp(id, "911", 3) == 0) {
+            return true;
         }
     }
     addr_ = 0;
     return false;
 }
 
-uint8_t Touch::read(TouchPoint *points, uint8_t maxPoints) {
-    if (!addr_) return 0;
+int8_t Touch::read(TouchPoint *points, uint8_t maxPoints) {
+    if (!addr_) return -1;
     uint8_t status;
-    if (!readRegs(GT911_REG_STATUS, &status, 1)) return 0;
-    if (!(status & 0x80)) return 0; // buffer not ready
+    if (!readRegs(GT911_REG_STATUS, &status, 1)) return -1;
+    if (!(status & 0x80)) return -1; // no new report
 
     uint8_t count = status & 0x0F;
     if (count > 5) count = 0;
@@ -171,16 +182,37 @@ uint8_t Touch::read(TouchPoint *points, uint8_t maxPoints) {
         }
         points[i].x = raw[1] | (raw[2] << 8);
         points[i].y = raw[3] | (raw[4] << 8);
+        transform(points[i]);
     }
     writeReg(GT911_REG_STATUS, 0); // ack so the GT911 refills the buffer
     return n;
+}
+
+// Inverse of Arduino_RGB_Display's rotation mapping (logical -> panel), so touch
+// coordinates land in the same logical space the display draws in.
+void Touch::transform(TouchPoint &p) const {
+    const uint16_t px = p.x, py = p.y;
+    switch (rotation_) {
+    case 1:
+        p.x = py;
+        p.y = B4848_LCD_WIDTH - 1 - px;
+        break;
+    case 2:
+        p.x = B4848_LCD_WIDTH - 1 - px;
+        p.y = B4848_LCD_HEIGHT - 1 - py;
+        break;
+    case 3:
+        p.x = B4848_LCD_HEIGHT - 1 - py;
+        p.y = px;
+        break;
+    }
 }
 
 bool Touch::readRegs(uint16_t reg, uint8_t *buf, size_t len) {
     Wire.beginTransmission(addr_);
     Wire.write(reg >> 8);
     Wire.write(reg & 0xFF);
-    if (Wire.endTransmission(false) != 0) return false;
+    Wire.endTransmission(false); // repeated start; a NACK shows up as a short read below
     if (Wire.requestFrom(addr_, (uint8_t)len) != len) return false;
     for (size_t i = 0; i < len; i++) buf[i] = Wire.read();
     return true;
