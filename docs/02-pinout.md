@@ -2,7 +2,7 @@
 
 The same pins are defined in code in [`common/lib/Board4848S040/src/Board4848S040_pins.h`](../common/lib/Board4848S040/src/Board4848S040_pins.h).
 
-Confidence: ✅ = matches the **vendor IO sheet** ([`vendor/io-pin-distribution.xlsx`](vendor/io-pin-distribution.xlsx)) and the community sources (ESPHome, rzeldent, Arduino_GFX).
+Confidence: ✅ = matches the **vendor schematic** ([`vendor/schematic-1.png`](vendor/schematic-1.png), [`schematic-2.png`](vendor/schematic-2.png)), the vendor IO sheet and the community sources (ESPHome, rzeldent, Arduino_GFX).
 
 ## Display: ST7701S
 | Function | GPIO | |
@@ -38,24 +38,27 @@ Confidence: ✅ = matches the **vendor IO sheet** ([`vendor/io-pin-distribution.
 
 ESPHome drives these **inverted**. IO1, IO2 and IO40 are shared with the NS4168 I2S amp. To use audio instead of relays, move the 0 Ω resistors R25/R26/R27 to R21/R22/R23 (per rzeldent).
 
-## microSD ✅ (vendor sheet)
-| Function | GPIO | Vendor label |
+## microSD ✅ (vendor schematic)
+| Function | GPIO | Card pin |
 |---|---|---|
-| CS | 42 | TF(D3) (D3 = CS in SPI mode) |
-| MISO | 41 | TF(D1) |
-| SCK | 48 | TF(SCK). Shared with LCD SPI. |
-| MOSI | 47 | TF(SDA). Shared with LCD SPI. |
+| CS | 42 | CD/DAT3 (10k pull-up) |
+| MOSI | 47 | CMD. Shared with LCD SPI SDA. |
+| SCK | 48 | CLK. Shared with LCD SPI SCK. |
+| MISO | 41 | DAT0 (the xlsx says "D1", which is wrong) |
 
-LCD SPI is only used during the init sequence, so the SD card can use the bus afterwards (`SPI.begin(48, 41, 47, 42)`). The vendor's "D1" label is odd; this still needs a hardware test.
+- **SPI mode only.** DAT1 and DAT2 go only to pull-ups, so 4-bit SD_MMC isn't possible.
+- **No card-detect.** Software can't tell whether a card is inserted; try to mount it and handle the failure.
+- LCD SPI is only used during init. Initialise the display first, then `SPI.begin(48, 41, 47, 42); SD.begin(42);`.
+- One project (Yoradio) reports that SD "did not work properly on this board". This still needs a hardware test.
 
-## I2S audio → NS4168 ✅ (vendor sheet)
+## I2S audio → NS4168 ✅ (vendor schematic)
 | Function | GPIO |
 |---|---|
 | BCLK | 1 |
 | LRCLK / WS | 2 |
 | DATA (amp DIN) | 40 |
 
-These are the same pins as relays L3/L2/L1. They are routed to the relays or the amp depending on the 0 Ω links (R25–27 → relays, R21–23 → amp).
+These are the same pins as relays 3/2/1. Each pin goes through a 0 Ω link to either the relay header or the amp: IO40 via R25 (relay1) or R21 (DIN); IO2 via R26 (relay2) or R22 (LRCLK); IO1 via R27 (relay3) or R23 (BCLK). The amp's SD_MODE is pulled up to VOUT-BAT through 1 MΩ, so it is always enabled with no mute pin.
 
 ## UART0 / CH340C
 TX = 43, RX = 44. These go to the USB-C bridge and the P1 header.
