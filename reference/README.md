@@ -2,16 +2,16 @@
 
 Shallow submodules. Don't edit them; copy what you need into `common/` or a project.
 `git submodule update --init` fetches them; `git submodule update --remote` updates them.
-Check each licence before copying code. GPL-3.0 code can't go into closed or non-GPL projects.
+Personal project: licences aren't a concern, so copy freely from any of these.
 
 ## Pulled in
 
 | Folder | Upstream | Licence | Stack | Why it's useful |
 |---|---|---|---|---|
 | `platformio-espressif32-sunton` | [rzeldent/platformio-espressif32-sunton](https://github.com/rzeldent/platformio-espressif32-sunton) | – | PlatformIO board JSONs | Board definitions `esp32-4848S040CIY1/CIY3`, datasheets, photos |
-| `esp32-smartdisplay` | [rzeldent/esp32-smartdisplay](https://github.com/rzeldent/esp32-smartdisplay) | GPL-3.0 | Arduino + LVGL 9 + esp_lcd | ~700★, actively maintained. One LVGL abstraction for all Sunton boards: display, touch, backlight, RGB LED, light sensor. Good **architecture reference** for a board HAL, and the quickest LVGL route if GPL is fine. |
+| `esp32-smartdisplay` | [rzeldent/esp32-smartdisplay](https://github.com/rzeldent/esp32-smartdisplay) | GPL-3.0 | Arduino + LVGL 9 + esp_lcd | ~700★, actively maintained. One LVGL abstraction for all Sunton boards: display, touch, backlight, RGB LED, light sensor. Good **architecture reference** for a board HAL, and the quickest LVGL route. |
 | `esp32-4848s040-st7701` | [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701) | – | Arduino_GFX | ST7701 init table verified on hardware (used in our `common/` lib) |
-| `ESP32-4848S040-LVGL-LGFX` | [joevial/ESP32-4848S040-LVGL-LGFX](https://github.com/joevial/ESP32-4848S040-LVGL-LGFX) | none stated | pioarduino + **LovyanGFX** + LVGL + **EEZ Studio** | Closest to our stack. Reference for an EEZ Studio UI-designer workflow, LovyanGFX (faster than Arduino_GFX, reported 200+ fps), a backlight coil-whine fix, a backlight-dimming hardware mod, and a 2nd I2C bus on GPIO1/40. No licence, so read only; don't copy. |
+| `ESP32-4848S040-LVGL-LGFX` | [joevial/ESP32-4848S040-LVGL-LGFX](https://github.com/joevial/ESP32-4848S040-LVGL-LGFX) | none stated | pioarduino + **LovyanGFX** + LVGL + **EEZ Studio** | Closest to our stack. Reference for an EEZ Studio UI-designer workflow, LovyanGFX (faster than Arduino_GFX, reported 200+ fps), a backlight coil-whine fix, a backlight-dimming hardware mod, and a 2nd I2C bus on GPIO1/40. |
 | `Guition-ESP32-S3-4848S040` | [alaltitov/Guition-ESP32-S3-4848S040](https://github.com/alaltitov/Guition-ESP32-S3-4848S040) | MIT | **ESPHome** + LVGL 8.4 | ~440★, the most popular firmware for this board. A full Home Assistant wall panel: climate, lights, media, weather, multi-language. Prior art for a HA panel UI and YAML layout. Docs: [alaltitov/…-DOCS](https://github.com/alaltitov/Guition-ESP32-S3-4848S040-DOCS) |
 | `ESP32-4848S040-First-Start` | [abcbbck-png/ESP32-4848S040-First-Start](https://github.com/abcbbck-png/ESP32-4848S040-First-Start) | MIT | **ESP-IDF** (CMake + sdkconfig) + LVGL | Starter for the native ESP-IDF route: `sdkconfig.defaults`, partitions and `esp_lcd` setup |
 
