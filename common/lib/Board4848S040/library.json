@@ -1,0 +1,10 @@
+{
+  "name": "Board4848S040",
+  "version": "0.1.0",
+  "description": "Pin map, ST7701 display bring-up and GT911 touch for the Guition/Sunton ESP32-4848S040C_I (ESP32-S3, 4\" 480x480).",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "moononournation/GFX Library for Arduino": "^1.6.4"
+  }
+}
