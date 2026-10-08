@@ -17,6 +17,8 @@ No reset pin is wired, so the init sequence must start with a software state tha
 
 ESPHome uses a back porch of 20/10, which also works. If you see **drift, shimmer or a rolling image**, adjust the porches or PCLK first. Higher PCLK gives a better frame rate but more PSRAM bandwidth pressure. 12–16 MHz is the safe zone.
 
+> **Watch the `Arduino_ESP32RGBPanel` arguments.** After the 8 sync values come `pclk_active_neg`, then `prefer_speed` in Hz. The aquaElectronics project passes `12000` in the `pclk_active_neg` slot, which inverts the PCLK edge and leaves the default 12 MHz clock. That still works on its author's panel. Our lib follows Arduino_GFX's own `ESP32_4848S040_86BOX_GUITION` config: `0, 12000000`. If you see sparkle or noise on edges, try `pclk_active_neg = 1`.
+
 ## Init sequence
 The full table is in [`Board4848S040.cpp`](../common/lib/Board4848S040/src/Board4848S040.cpp). It is taken from [aquaElectronics/esp32-4848s040-st7701](https://github.com/aquaElectronics/esp32-4848s040-st7701), whose author notes that "generic ST7701 examples often fail on this panel". Arduino_GFX also ships `st7701_type9_init_operations` for the `ESP32_4848S040_86BOX_GUITION` dev device, which is a good second option if colours or gamma look off.
 

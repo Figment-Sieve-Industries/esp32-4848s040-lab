@@ -111,7 +111,9 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation) {
         B4848_LCD_B0, B4848_LCD_B1, B4848_LCD_B2, B4848_LCD_B3, B4848_LCD_B4,
         1 /* hsync_polarity */, 10 /* hsync_front_porch */, 8 /* hsync_pulse_width */, 50 /* hsync_back_porch */,
         1 /* vsync_polarity */, 10 /* vsync_front_porch */, 8 /* vsync_pulse_width */, 20 /* vsync_back_porch */,
-        12000000 /* pclk Hz */);
+        0 /* pclk_active_neg */, 12000000 /* prefer_speed (PCLK Hz) */, false /* useBigEndian */,
+        0 /* de_idle_high */, 0 /* pclk_idle_high */, 0 /* bounce_buffer_size_px */);
+    // Matches Arduino_GFX's ESP32_4848S040_86BOX_GUITION dev-device config.
 
     Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
         B4848_LCD_WIDTH, B4848_LCD_HEIGHT, panel, rotation, true /* auto_flush */,

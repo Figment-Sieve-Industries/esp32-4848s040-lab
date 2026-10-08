@@ -46,6 +46,7 @@ mini-screen/
 | # | Project | Status | Description |
 |---|---|---|---|
 | 01 | [hello-display-touch](projects/01-hello-display-touch/) | Builds ✅ (not yet run on hardware) | Colour test plus finger-paint, prints touch coordinates |
+| 02 | [lvgl-hello](projects/02-lvgl-hello/) | Builds ✅ (not yet run on hardware) | LVGL 9.5 base: button, backlight slider, FPS monitor |
 
 See [projects/README.md](projects/README.md) for how to add a new project.
 
