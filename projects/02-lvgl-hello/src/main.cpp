@@ -77,7 +77,7 @@ static void buildUi() {
 
     lv_obj_t *slider = lv_slider_create(scr);
     lv_obj_set_width(slider, 360);
-    lv_slider_set_range(slider, 10, 255);
+    lv_slider_set_range(slider, B4848_LCD_BL_MIN, 255);
     lv_slider_set_value(slider, 255, LV_ANIM_OFF);
     lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -70);
     lv_obj_add_event_cb(slider, sliderCb, LV_EVENT_VALUE_CHANGED, nullptr);

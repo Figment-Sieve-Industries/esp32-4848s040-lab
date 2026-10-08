@@ -4,3 +4,19 @@
 [submodule "reference/esp32-4848s040-st7701"]
 	path = reference/esp32-4848s040-st7701
 	url = https://github.com/aquaElectronics/esp32-4848s040-st7701.git
+[submodule "reference/esp32-smartdisplay"]
+	path = reference/esp32-smartdisplay
+	url = https://github.com/rzeldent/esp32-smartdisplay.git
+	shallow = true
+[submodule "reference/ESP32-4848S040-LVGL-LGFX"]
+	path = reference/ESP32-4848S040-LVGL-LGFX
+	url = https://github.com/joevial/ESP32-4848S040-LVGL-LGFX.git
+	shallow = true
+[submodule "reference/Guition-ESP32-S3-4848S040"]
+	path = reference/Guition-ESP32-S3-4848S040
+	url = https://github.com/alaltitov/Guition-ESP32-S3-4848S040.git
+	shallow = true
+[submodule "reference/ESP32-4848S040-First-Start"]
+	path = reference/ESP32-4848S040-First-Start
+	url = https://github.com/abcbbck-png/ESP32-4848S040-First-Start.git
+	shallow = true

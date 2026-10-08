@@ -41,6 +41,8 @@ mini-screen/
 | [docs/06-frameworks-and-libraries.md](docs/06-frameworks-and-libraries.md) | PlatformIO/Arduino, ESP-IDF, ESPHome, LVGL, SquareLine |
 | [docs/07-gotchas.md](docs/07-gotchas.md) | Known pitfalls |
 | [docs/datasheets/](docs/datasheets/) | ST7701S, GT911, NS4168, ESP32-S3, WROOM-1 PDFs |
+| [docs/vendor/](docs/vendor/) | Guition data pack: **official IO pin sheet**, spec, user manual, dimensions |
+| [reference/README.md](reference/README.md) | Prior-art repos (smartdisplay, LovyanGFX+EEZ, ESPHome HA panel, ESP-IDF starter) and what to learn from each |
 
 ### Projects
 | # | Project | Status | Description |

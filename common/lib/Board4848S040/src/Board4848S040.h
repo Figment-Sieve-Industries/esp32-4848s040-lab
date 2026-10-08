@@ -10,7 +10,7 @@ namespace board4848 {
 // Create the display object and run the ST7701 init. Returns nullptr on failure.
 Arduino_RGB_Display *initDisplay(uint8_t rotation = 0);
 
-// Backlight brightness 0..255 (0 = off).
+// Backlight brightness 0..255 (0 = off). Below ~B4848_LCD_BL_MIN the AP3031 driver cuts out.
 void setBacklight(uint8_t level);
 
 struct TouchPoint {

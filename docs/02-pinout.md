@@ -2,7 +2,7 @@
 
 The same pins are defined in code in [`common/lib/Board4848S040/src/Board4848S040_pins.h`](../common/lib/Board4848S040/src/Board4848S040_pins.h).
 
-Confidence: ✅ = consistent across ESPHome, rzeldent board defs and a hardware-verified Arduino project. ⚠️ = commonly reported but not verified here.
+Confidence: ✅ = matches the **vendor IO sheet** ([`vendor/io-pin-distribution.xlsx`](vendor/io-pin-distribution.xlsx)) and the community sources (ESPHome, rzeldent, Arduino_GFX).
 
 ## Display: ST7701S
 | Function | GPIO | |
@@ -17,7 +17,7 @@ Confidence: ✅ = consistent across ESPHome, rzeldent board defs and a hardware-
 | R0–R4 | 11, 12, 13, 14, 0 | ✅ |
 | G0–G5 | 8, 20, 3, 46, 9, 10 | ✅ |
 | B0–B4 | 4, 5, 6, 7, 15 | ✅ |
-| Backlight | 38 (active high, PWM) | ✅ |
+| Backlight | 38 (active high, PWM; AP3031 driver, usable range ~60–255) | ✅ |
 | LCD reset | not connected | ✅ |
 
 ## Touch: GT911
@@ -38,15 +38,24 @@ Confidence: ✅ = consistent across ESPHome, rzeldent board defs and a hardware-
 
 ESPHome drives these **inverted**. IO1, IO2 and IO40 are shared with the NS4168 I2S amp. To use audio instead of relays, move the 0 Ω resistors R25/R26/R27 to R21/R22/R23 (per rzeldent).
 
-## microSD: ⚠️ unverified
+## microSD ✅ (vendor sheet)
+| Function | GPIO | Vendor label |
+|---|---|---|
+| CS | 42 | TF(D3) (D3 = CS in SPI mode) |
+| MISO | 41 | TF(D1) |
+| SCK | 48 | TF(SCK). Shared with LCD SPI. |
+| MOSI | 47 | TF(SDA). Shared with LCD SPI. |
+
+LCD SPI is only used during the init sequence, so the SD card can use the bus afterwards (`SPI.begin(48, 41, 47, 42)`). The vendor's "D1" label is odd; this still needs a hardware test.
+
+## I2S audio → NS4168 ✅ (vendor sheet)
 | Function | GPIO |
 |---|---|
-| CS | 42 |
-| SCK | 48 (shared with LCD SPI) |
-| MOSI | 47 (shared with LCD SPI) |
-| MISO | 41 |
+| BCLK | 1 |
+| LRCLK / WS | 2 |
+| DATA (amp DIN) | 40 |
 
-Check these against the vendor schematic before relying on them. LCD SPI is only used during init, so sharing the bus afterwards is fine.
+These are the same pins as relays L3/L2/L1. They are routed to the relays or the amp depending on the 0 Ω links (R25–27 → relays, R21–23 → amp).
 
 ## UART0 / CH340C
 TX = 43, RX = 44. These go to the USB-C bridge and the P1 header.

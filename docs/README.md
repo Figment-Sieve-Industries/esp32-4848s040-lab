@@ -25,5 +25,14 @@ Source: [rzeldent/platformio-espressif32-sunton](https://github.com/rzeldent/pla
 - `esp32-4848S040C-front.png`
 - `esp32-4848S040C-back.jpg`: back of the PCB with labelled connectors (CH340C, TF slot, NS4168, P1 UART, H1 header, BAT, BOOT/RST)
 
-## Vendor material not in this repo
-Guition/JCZN distribute a zip "data pack" (schematic, demo code, SquareLine/LVGL examples) through the seller. Ask the AliExpress seller for the **ESP32-4848S040** download link. When you get it, unpack it into `docs/vendor/` and add an entry here. **The schematic is the authority for the SD card pins**, which are still unverified.
+## Vendor data pack (`vendor/`)
+Taken from the Guition data pack mirrored at [NorthernMan54/ESP32-4848S040](https://github.com/NorthernMan54/ESP32-4848S040/tree/main/ESP32-4848S040). That mirror also has the vendor Arduino demo, factory "burn" images and the flash download tool.
+
+| File | What |
+|---|---|
+| `io-pin-distribution.xlsx` | **Official IO pin map**. This is the authority for pins. |
+| `specifications-EN.pdf` | Product specification |
+| `getting-started-4.0inch.pdf` | Vendor user manual (Arduino IDE setup, demos) |
+| `dimensions.jpg`, `structure.jpg` | Mechanical drawings |
+
+No schematic has been found publicly yet. If the seller supplies one, put it here.

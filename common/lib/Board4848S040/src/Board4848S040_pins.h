@@ -34,7 +34,8 @@
 #define B4848_LCD_B3 7
 #define B4848_LCD_B4 15
 
-#define B4848_LCD_BL 38 // backlight, active high, PWM capable
+#define B4848_LCD_BL 38 // backlight (AP3031 driver), active high. Dims poorly below ~60/255
+#define B4848_LCD_BL_MIN 60
 
 #define B4848_LCD_WIDTH 480
 #define B4848_LCD_HEIGHT 480
@@ -44,12 +45,17 @@
 #define B4848_TOUCH_SCL 45 // strapping pin
 #define B4848_TOUCH_ADDR 0x5D // some units answer on 0x14 instead
 
-// ---- Relays (relay variants only). Shared with I2S audio, see docs. ----
+// ---- Relays (relay variants only). Vendor labels L1/L2/L3. Shared with I2S audio, see docs. ----
 #define B4848_RELAY1 40
 #define B4848_RELAY2 2
 #define B4848_RELAY3 1
 
-// ---- microSD (TF) slot - commonly reported, NOT yet verified on hardware ----
+// ---- I2S to NS4168 amp (only after moving 0R links R25-27 -> R21-23) ----
+#define B4848_I2S_BCLK 1
+#define B4848_I2S_LRCLK 2
+#define B4848_I2S_DOUT 40 // vendor sheet: "I2S-DIN" (amp input)
+
+// ---- microSD (TF) slot, SPI mode. Confirmed by vendor IO sheet (docs/vendor/io-pin-distribution.xlsx) ----
 #define B4848_SD_CS 42
 #define B4848_SD_SCK 48
 #define B4848_SD_MOSI 47

@@ -126,7 +126,12 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation) {
 }
 
 void setBacklight(uint8_t level) {
-    pinMode(B4848_LCD_BL, OUTPUT);
+    static bool configured = false;
+    if (!configured) {
+        // 100 kHz PWM avoids audible coil whine from the AP3031 backlight driver.
+        analogWriteFrequency(B4848_LCD_BL, 100000);
+        configured = true;
+    }
     analogWrite(B4848_LCD_BL, level);
 }
 

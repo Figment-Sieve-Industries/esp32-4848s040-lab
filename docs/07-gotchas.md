@@ -16,3 +16,5 @@
 | Official espressif32 PIO platform fails with Arduino_GFX 1.6 | Use the **pioarduino** platform (Arduino core 3.x). |
 | `idf_tools.py installation failed`, then `xtensa-esp32s3-elf-g++ is not recognized` | First build was run from **Git Bash/MSYS**, which ESP's tool installer rejects. Run `pio` from PowerShell, cmd or the VS Code PlatformIO buttons. |
 | `IncompatiblePlatform ... depends on PlatformIO Core >=6.2.0` | Projects pin pioarduino `54.03.21-2`, which works with Core 6.1.x. To use newer releases, run `pio upgrade` first. |
+| Backlight turns off when dimmed low | The AP3031 driver cuts out below ~60/255. Use `B4848_LCD_BL_MIN`. A hardware mod for deeper dimming is described in `reference/ESP32-4848S040-LVGL-LGFX`. |
+| Backlight whines | Low PWM frequency. `setBacklight()` uses 100 kHz. |
