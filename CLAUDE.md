@@ -22,6 +22,7 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - **IO1, IO2 and IO40 are shared** by relays, I2S audio (0 Ω links R25–27 vs R21–23) and a possible 2nd I2C bus.
 - **GPIO0, 3, 45 and 46 are strapping pins** used by the LCD and touch. Don't add loads to the touch bus (GPIO45).
 - **Back up the factory flash before the first upload:** `tools/backup-flash.ps1`.
+- **Credentials live in `projects/*/src/secrets.h` only** (git-ignored, `**/src/secrets.h`). Commit a `secrets.example.h` with placeholders. Never put real SSIDs, passwords or tokens in docs, commits or logs.
 - **New projects:** numbered `NN-name`. Copy `02-lvgl-hello` for UI work or `01-hello-display-touch` for plain graphics, without `.pio/`. Add a row to `projects/README.md`.
 - **Status vocabulary:** `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" is not "works on hw"; only claim hardware results the user has reported.
 - **Arduino vs ESP-IDF** is documented as reasoning (docs/06), not a decision. Don't present it as decided.

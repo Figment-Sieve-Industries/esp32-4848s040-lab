@@ -10,6 +10,7 @@ This is the single list of projects; the root README links here. Each project is
 | 02 | [02-lvgl-hello](02-lvgl-hello/) | works on hw | LVGL 9.5 base: button, backlight slider, FPS monitor. **Copy this for UI projects.** |
 | 03 | [03-lvgl-demos](03-lvgl-demos/) | works on hw | Touch launcher for LVGL's official demos: Widgets, Music (square), Benchmark, Stress. Benchmark results are in the [hardware log](../docs/hardware-log.md). |
 | 04 | [04-lvgl-fb2-bench](04-lvgl-fb2-bench/) | works on hw | Experiment: double framebuffers + vsync swap. Works, but measured slower (20 vs 35 FPS). See the hardware log. |
+| 05 | [05-powerwall-display](05-powerwall-display/) | works on hw | Live Tesla Powerwall 3 power flow (solar/grid/home/battery, SOC, off-grid alert) from the gateway's local LAN API. Multi-Wi-Fi, NTP clock, rotation. Needs `src/secrets.h`. |
 
 Status values: `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" means it compiles; it has **not** been run on a board yet.
 

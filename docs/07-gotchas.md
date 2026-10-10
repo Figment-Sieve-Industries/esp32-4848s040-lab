@@ -23,3 +23,6 @@
 | Official espressif32 PIO platform fails with Arduino_GFX 1.6 | Use the **pioarduino** platform (Arduino core 3.x). The base ini already does. |
 | `-O2` in `build_flags` has no effect (identical firmware) | The Arduino core adds `-Os` after `build_flags` and the last `-O` wins. Use `build_unflags = -Os` as well (done in `common/platformio-base.ini`). |
 | Internal RAM is tight in LVGL projects | The defaults trade internal RAM for speed: 120-line buffer 115 KB, IRAM functions ~55 KB, about 87 KB left in `03`. For Wi-Fi/BLE, pass a smaller `bufLines` to `lvglBegin()` (e.g. 48). |
+| `SSL - Memory allocation failed` (-32512) | The Arduino core's mbedTLS allocates **only from internal RAM** (~40–50 KB per TLS session). LVGL speed options (IRAM functions, a big draw buffer) can starve it. In network projects, drop `LV_ATTRIBUTE_FAST_MEM` and use ~48 buffer lines. |
+| JSON from an HTTP API parses as a number / fields are all 0 | Chunked transfer encoding: `deserializeJson(http.getStream())` reads the hex chunk-size line. Use `http.getString()` (de-chunks), or `http.useHTTP10(true)`. |
+| `WiFiMulti: no matching wifi found` but the SSID exists | It's probably 5 GHz-only. The ESP32-S3 is 2.4 GHz only. `05-powerwall-display` prints a scan of what it can see. |

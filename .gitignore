@@ -9,3 +9,6 @@ __pycache__/
 *.bin
 !docs/**/*.bin
 !firmware/**/*.bin
+
+# Per-project credentials (copy secrets.example.h -> secrets.h)
+**/src/secrets.h

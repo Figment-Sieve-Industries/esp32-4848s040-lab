@@ -17,6 +17,7 @@ What has been verified on real units. Add an entry each time something is tested
 | Backlight | 100 kHz LEDC: smooth dimming 255 → 100, **still lit at 100** (`B4848_LCD_BL_MIN`), **no audible whine**. The true cut-out point below 100 isn't measured yet |
 | LVGL (02-lvgl-hello) | LVGL 9.5 via `lvglBegin()`: renders correctly, button taps count once each, slider drags smoothly, no flicker |
 | Restart quirk | Restarting via `ESP.restart()` from the 03 launcher once came back as `RTCWDT_RTC_RST` (RTC watchdog) instead of a software reset. It recovered by itself. Suspected: restarting while the RGB panel DMA is running. Not fixed yet |
+| Wi-Fi + HTTPS | Joins `<home-ssid>` (2.4 GHz, ch 13, ≈ −60 dBm). HTTPS to the Powerwall gateway works with TLS and the LVGL UI running (~125 KB internal heap free while polling) |
 | Not yet tested | Corner accuracy, rotation, backlight cut-out below 100, SD card, audio, relays, Wi-Fi, battery |
 
 ### LVGL benchmark, unit 1 (2026-10-10)
