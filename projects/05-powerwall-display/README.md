@@ -46,7 +46,7 @@
 ## Screens (swipe left / right)
 | # | Screen | Shows |
 |---|---|---|
-| 1 | **B · Power flow** | House hub with chevron flows. Weather card: temperature, scrolling condition, high/low, today's rain chance, animated icon. Grid status. Top bar: Wi-Fi network + dBm |
+| 1 | **B · Power flow** | House hub with chevron flows; mains voltage under the Home value (amber outside 216-253 V). Weather card: temperature, scrolling condition, high/low, today's rain chance, animated icon. Grid status. Top bar: Wi-Fi network + dBm |
 | 2 | **G · Today** | Self-powered % ring, solar / home / Powerwall in-out kWh, exported / imported tiles, solar-by-hour bars |
 | 3 | **H · Battery & grid** | SOC, charge/discharge power and time to full/empty (13.5 kWh assumed), grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, grid-services (VPP) badge |
 | 4 | **I · Weather** | Current conditions (feels-like, wind, high/low, rain %), next 12 h in 2 h steps, lifetime totals |

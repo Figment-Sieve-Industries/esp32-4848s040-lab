@@ -115,7 +115,7 @@ void pathTick(FlowPath &f, float dt) {
 TopBar topBar;
 lv_obj_t *lblStatusLine;
 lv_obj_t *wCard, *icoWeather, *lblTemp, *lblCond, *lblHiLo, *rainRow, *lblRain, *statusDot, *lblGridStatus;
-lv_obj_t *valSolar, *valHome, *valGrid, *subGrid, *valSoc, *subBatt, *icoBatt;
+lv_obj_t *valSolar, *valHome, *valVolt, *valGrid, *subGrid, *valSoc, *subBatt, *icoBatt;
 int weatherIconKey = -100;
 uint32_t lastAnimMs;
 
@@ -209,6 +209,7 @@ lv_obj_t *houseCreate() {
     lv_obj_t *colHome = column(160, 300, 160, LV_TEXT_ALIGN_CENTER);
     colCaption(colHome, C_HOME, "HOME");
     valHome = colLabel(colHome, &lv_font_montserrat_26, TEXT, "--");
+    valVolt = colLabel(colHome, &lv_font_montserrat_14, MUTED, ""); // mains voltage
 
     // Solar
     chip(32, 76, C_SOLAR, Icon::Sun);
@@ -252,6 +253,7 @@ lv_obj_t *houseCreate() {
     lblCond = label(wcol, &lv_font_montserrat_12, TEXT, "Weather");
     lv_obj_set_width(lblCond, lv_pct(100));
     lv_label_set_long_mode(lblCond, LV_LABEL_LONG_SCROLL_CIRCULAR); // long conditions scroll
+    lv_obj_set_style_anim_duration(lblCond, lv_anim_speed_clamped(20, 300, 10000), 0); // 20 px/s (default 40)
     lblHiLo = label(wcol, &lv_font_montserrat_12, MUTED, "");
 
     rainRow = row(wCard, 6);
@@ -328,6 +330,7 @@ void houseRefresh() {
     if (stale) {
         setText(valSolar, "--");
         setText(valHome, "--");
+        setText(valVolt, "");
         setText(valGrid, "--");
         setText(subGrid, "");
         setText(subBatt, "");
@@ -338,6 +341,14 @@ void houseRefresh() {
         setText(valSolar, buf);
         formatPower(buf, sizeof(buf), d.loadW);
         setText(valHome, buf);
+        // Mains voltage; amber outside the UK statutory range 216-253 V
+        if (d.voltageV > 50) {
+            snprintf(buf, sizeof(buf), "%.1f V", d.voltageV);
+            setText(valVolt, buf);
+            setTextColor(valVolt, d.voltageV < 216 || d.voltageV > 253 ? C_SOLAR : MUTED);
+        } else {
+            setText(valVolt, "");
+        }
         formatPower(buf, sizeof(buf), d.siteW);
         setText(valGrid, buf);
         setText(subGrid, offGrid ? "Outage" : fabsf(d.siteW) < MIN_FLOW_W ? "Idle" : d.siteW > 0 ? "Importing" : "Exporting");
