@@ -87,6 +87,8 @@ static bool pollOnce(WiFiClientSecure &client) {
         filter[m]["energy_exported"] = true;
         filter[m]["energy_imported"] = true;
         filter[m]["instant_average_voltage"] = true;
+        filter[m]["instant_reactive_power"] = true;
+        filter[m]["instant_apparent_power"] = true;
         filter[m]["frequency"] = true;
     }
 
@@ -112,6 +114,10 @@ static bool pollOnce(WiFiClientSecure &client) {
     s_data.loadW = agg["load"]["instant_power"] | 0.0f;
     s_data.solarW = agg["solar"]["instant_power"] | 0.0f;
     s_data.voltageV = agg["site"]["instant_average_voltage"] | 0.0f;
+    s_data.siteVar = agg["site"]["instant_reactive_power"] | 0.0f;
+    s_data.siteVA = agg["site"]["instant_apparent_power"] | 0.0f;
+    s_data.loadVar = agg["load"]["instant_reactive_power"] | 0.0f;
+    s_data.loadVA = agg["load"]["instant_apparent_power"] | 0.0f;
     s_data.frequencyHz = agg["battery"]["frequency"] | 0.0f;
     s_data.solarExportedWh = agg["solar"]["energy_exported"] | 0.0;
     s_data.loadImportedWh = agg["load"]["energy_imported"] | 0.0;

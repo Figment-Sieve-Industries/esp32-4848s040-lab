@@ -48,7 +48,7 @@ struct TopBar {
 TopBar topBarCreate(lv_obj_t *scr);
 void topBarUpdate(TopBar &tb);
 
-// Page indicator centred at y = 452: active page is a 20x8 pill (TEXT), others 8x8 dots (TRACK).
+// Page indicator centred at y = 456: active page is a 20x8 pill (TEXT), others 8x8 dots (TRACK).
 void pageDots(lv_obj_t *scr, int activeIndex);
 
 // Animations (all LVGL-cheap; deleted automatically with the object)

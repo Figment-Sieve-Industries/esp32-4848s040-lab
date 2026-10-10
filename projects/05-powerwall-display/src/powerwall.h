@@ -13,6 +13,8 @@ struct PwData {
     float soc = 0;              // battery %, as reported by /api/system_status/soe
     bool gridConnected = true;
     bool gridServicesActive = false;
+    float siteVar = 0, siteVA = 0;  // grid reactive (var) / apparent (VA) power
+    float loadVar = 0, loadVA = 0;  // home reactive / apparent power
     float voltageV = 0;         // site average voltage
     float frequencyHz = 0;      // battery-side frequency (the site meter reports 0)
     // Lifetime energy counters in Wh (never decrease)

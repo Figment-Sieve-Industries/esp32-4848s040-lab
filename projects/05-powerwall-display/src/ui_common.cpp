@@ -157,11 +157,11 @@ void formatKWh(char *buf, size_t n, double kwh) {
 TopBar topBarCreate(lv_obj_t *scr) {
     TopBar tb;
     tb.time = label(scr, &lv_font_montserrat_28, TEXT, "--:--");
-    lv_obj_set_pos(tb.time, 14, 8);
+    lv_obj_set_pos(tb.time, 12, 8);
     tb.date = label(scr, &lv_font_montserrat_14, MUTED, "");
-    lv_obj_set_pos(tb.date, 104, 18);
+    lv_obj_set_pos(tb.date, 102, 18);
     tb.wifi = label(scr, &lv_font_montserrat_14, MUTED, "");
-    lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -14, 17);
+    lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -12, 17);
     tb.wifiIcon = iconCreate(scr, Icon::Wifi, 20, MUTED);
     lv_obj_align_to(tb.wifiIcon, tb.wifi, LV_ALIGN_OUT_LEFT_MID, -6, -1);
     return tb;
@@ -185,7 +185,7 @@ void topBarUpdate(TopBar &tb) {
         setText(tb.wifi, "offline");
         setTextColor(tb.wifi, C_ALERT);
     }
-    lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -14, 17);
+    lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -12, 17);
     lv_obj_align_to(tb.wifiIcon, tb.wifi, LV_ALIGN_OUT_LEFT_MID, -6, -1);
 }
 
@@ -201,7 +201,7 @@ void pageDots(lv_obj_t *scr, int active) {
         lv_obj_set_style_bg_color(d, i == active ? TEXT : TRACK, 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
     }
-    lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 452);
+    lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 456);
 }
 
 void animPulse(lv_obj_t *obj, uint32_t periodMs) { loop(obj, opaBg, LV_OPA_COVER, 90, periodMs); }
