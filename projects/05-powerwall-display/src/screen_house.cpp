@@ -28,6 +28,8 @@ constexpr uint32_t STALE_MS = 10000;
 constexpr float CHEVRON_SPACING = 64; // px between chevrons along a path
 constexpr int MAX_CHEVRONS = 6;
 const lv_color_t CHIP_TEXT = lv_color_hex(0xC9D1D9);
+constexpr int BATT_PILL_W = 162;
+constexpr int SOC_BAR_W = BATT_PILL_W - 44; // inset 22 px each side
 
 lv_obj_t *scr;
 
@@ -133,12 +135,12 @@ lv_obj_t *track(int x, int y, int w, int h) {
     return o;
 }
 
-// 150x56 pill: icon left, caption over value. Returns the value label; *iconOut gets the icon.
-lv_obj_t *pill(int x, int y, lv_color_t color, Icon icon, const char *cap, lv_obj_t **pillOut = nullptr,
+// w x 56 pill: icon left, caption over value. Returns the value label; *iconOut gets the icon.
+lv_obj_t *pill(int x, int y, int w, lv_color_t color, Icon icon, const char *cap, lv_obj_t **pillOut = nullptr,
                lv_obj_t **iconOut = nullptr) {
     lv_obj_t *p = box(scr);
     lv_obj_set_pos(p, x, y);
-    lv_obj_set_size(p, 150, 56);
+    lv_obj_set_size(p, w, 56);
     lv_obj_set_style_radius(p, 28, 0);
     lv_obj_set_style_bg_color(p, CARD, 0);
     lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
@@ -211,13 +213,13 @@ lv_obj_t *houseCreate() {
     track(238, 92, 4, 104);
     track(85, 234, 122, 4);
     track(85, 236, 4, 124);
-    track(273, 234, 122, 4);
-    track(391, 236, 4, 124);
+    track(273, 234, 116, 4);
+    track(385, 236, 4, 124);
 
     // Flow paths, forward = solar->house, house->grid (export), house->battery (charge)
     pathCreate(paths[P_SOLAR], {162, 92}, {240, 92}, {240, 196}, C_SOLAR);
     pathCreate(paths[P_GRID], {207, 236}, {87, 236}, {87, 360}, C_GRID);
-    pathCreate(paths[P_BATT], {273, 236}, {393, 236}, {393, 360}, C_BATT);
+    pathCreate(paths[P_BATT], {273, 236}, {387, 236}, {387, 360}, C_BATT);
 
     // House, home value and its chips
     lv_obj_t *house = iconCreate(scr, Icon::House, 120, C_HOME, 1.4f);
@@ -232,13 +234,14 @@ lv_obj_t *houseCreate() {
     lv_obj_align(homeChips, LV_ALIGN_TOP_MID, 0, 326);
 
     // Pills
-    valSolar = pill(12, 64, C_SOLAR, Icon::Sun, "SOLAR");
-    valGrid = pill(12, 360, C_GRID, Icon::Pylon, "GRID");
+    valSolar = pill(12, 64, 150, C_SOLAR, Icon::Sun, "SOLAR");
+    valGrid = pill(12, 360, 150, C_GRID, Icon::Pylon, "GRID");
     lv_obj_t *battPill;
-    valSoc = pill(318, 360, C_BATT, Icon::Battery, "POWERWALL", &battPill, &icoBatt);
+    // Wider than the others so "POWERWALL" fits next to the icon
+    valSoc = pill(306, 360, BATT_PILL_W, C_BATT, Icon::Battery, "POWERWALL", &battPill, &icoBatt);
     // Thin SOC bar inside the bottom of the Powerwall pill
     lv_obj_t *socTrack = box(battPill);
-    lv_obj_set_size(socTrack, 106, 4);
+    lv_obj_set_size(socTrack, SOC_BAR_W, 4);
     lv_obj_set_pos(socTrack, 19, 43);
     lv_obj_set_style_radius(socTrack, 2, 0);
     lv_obj_set_style_bg_color(socTrack, TRACK, 0);
@@ -393,7 +396,7 @@ void houseRefresh() {
         snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(d.soc));
         setText(valSoc, buf);
         iconSetBatteryLevel(icoBatt, d.soc);
-        setWidth(socFill, (int32_t)lroundf(106 * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
+        setWidth(socFill, (int32_t)lroundf(SOC_BAR_W * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
         char pw[16];
         formatPower(pw, sizeof(pw), d.batteryW);
         if (fabsf(d.batteryW) < MIN_FLOW_W) snprintf(buf, sizeof(buf), "Idle");
