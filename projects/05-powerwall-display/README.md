@@ -2,6 +2,8 @@
 
 **Goal:** a live Tesla Powerwall 3 power-flow display, read straight from the gateway on the home LAN. No cloud, no server.
 
+**Layout:** Solar top, Powerwall (SOC ring) left, Home right, Grid bottom.
+
 **What it shows**
 - **Nodes:** Solar, Grid, Home and Powerwall, with live watts.
 - **Flow dots:** they run along each link in the direction power is flowing; faster for more power.
@@ -39,4 +41,4 @@
 - The LVGL buffer is 48 lines.
 - Result: about 170 KB internal free at boot and ~125 KB while polling.
 
-**Status:** `works on hw` (2026-10-10). Live data confirmed over serial; on-screen layout awaiting feedback.
+**Status:** `works on hw` (2026-10-10). Layout (rotation 3, Powerwall left, Grid bottom) confirmed; flow animation ~28 fps, smooth.

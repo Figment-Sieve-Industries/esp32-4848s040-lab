@@ -1,10 +1,10 @@
 // Power-flow screen, 480x480:
 //
-//              [ Solar ]
-//                  |
-//   [ Grid ] ---- hub ---- [ Home ]
-//                  |
-//            ( Powerwall % )
+//                [ Solar ]
+//                    |
+//   ( Powerwall % ) -- hub -- [ Home ]
+//                    |
+//                 [ Grid ]
 //
 // Dots run along each link in the direction power flows; faster for more power.
 #include "ui.h"
@@ -12,6 +12,7 @@
 #include <Arduino.h>
 #include <math.h>
 #include <time.h>
+#include <string.h>
 
 void setBacklightLevel(uint8_t level); // main.cpp
 
@@ -19,6 +20,11 @@ namespace {
 
 constexpr int NODE_D = 108;       // node circle diameter
 constexpr int HUB_X = 240, HUB_Y = 252;
+constexpr int SOLAR_X = HUB_X, SOLAR_Y = 110;
+constexpr int BATT_X = 84, BATT_Y = HUB_Y;   // left; leaves room for the SOC ring
+constexpr int HOME_X = 404, HOME_Y = HUB_Y;
+constexpr int GRID_X = HUB_X, GRID_Y = 392;
+constexpr int ARC_D = NODE_D + 22;
 constexpr int DOTS_PER_LINK = 3;
 constexpr float MIN_FLOW_W = 30;  // below this a link shows no flow
 constexpr uint32_t STALE_MS = 10000;
@@ -105,6 +111,8 @@ void linkCreate(Link &l, int x, int y, lv_color_t color) {
     }
 }
 
+void setHidden(lv_obj_t *o, bool hidden);
+
 // power > 0 means flowing from the node towards the hub.
 void linkSet(Link &l, float powerTowardHub, bool stale) {
     float p = fabsf(powerTowardHub);
@@ -112,10 +120,7 @@ void linkSet(Link &l, float powerTowardHub, bool stale) {
     l.toHub = powerTowardHub > 0;
     // 0.3 links/s at 30 W up to ~1.5 links/s at 5 kW+
     l.speed = 0.3f + 1.2f * fminf(p, 5000.0f) / 5000.0f;
-    for (auto d : l.dots) {
-        if (l.active) lv_obj_remove_flag(d, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN);
-    }
+    for (auto d : l.dots) setHidden(d, !l.active);
 }
 
 void animTick(lv_timer_t *) {
@@ -137,6 +142,19 @@ void animTick(lv_timer_t *) {
             float py = l.y + uy * (r + t * run);
             lv_obj_set_pos(l.dots[k], (int32_t)px - 5, (int32_t)py - 5);
         }
+    }
+}
+
+// Only touch a label when its text actually changes: lv_label_set_text() always invalidates,
+// and needless redraws steal frame time from the flow animation.
+void setText(lv_obj_t *l, const char *text) {
+    if (strcmp(lv_label_get_text(l), text) != 0) lv_label_set_text(l, text);
+}
+
+void setHidden(lv_obj_t *o, bool hidden) {
+    if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) != hidden) {
+        if (hidden) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -163,10 +181,10 @@ void uiCreate() {
     lv_obj_add_event_cb(scr, screenTap, LV_EVENT_CLICKED, nullptr);
 
     // Links first so the nodes draw over their ends
-    linkCreate(links[L_SOLAR], HUB_X, 110, C_SOLAR);
-    linkCreate(links[L_GRID], 76, HUB_Y, C_GRID);
-    linkCreate(links[L_HOME], 404, HUB_Y, C_HOME);
-    linkCreate(links[L_BATT], HUB_X, 392, C_BATT);
+    linkCreate(links[L_SOLAR], SOLAR_X, SOLAR_Y, C_SOLAR);
+    linkCreate(links[L_GRID], GRID_X, GRID_Y, C_GRID);
+    linkCreate(links[L_HOME], HOME_X, HOME_Y, C_HOME);
+    linkCreate(links[L_BATT], BATT_X, BATT_Y, C_BATT);
 
     lv_obj_t *hub = lv_obj_create(scr);
     lv_obj_remove_style_all(hub);
@@ -176,24 +194,25 @@ void uiCreate() {
     lv_obj_set_style_bg_color(hub, LINE, 0);
     lv_obj_set_style_bg_opa(hub, LV_OPA_COVER, 0);
 
-    valSolar = node(HUB_X, 110, C_SOLAR, LV_SYMBOL_CHARGE " SOLAR");
-    valGrid = node(76, HUB_Y, C_GRID, LV_SYMBOL_POWER " GRID");
-    valHome = node(404, HUB_Y, C_HOME, LV_SYMBOL_HOME " HOME");
+    valSolar = node(SOLAR_X, SOLAR_Y, C_SOLAR, LV_SYMBOL_CHARGE " SOLAR");
+    valGrid = node(GRID_X, GRID_Y, C_GRID, LV_SYMBOL_POWER " GRID");
+    valHome = node(HOME_X, HOME_Y, C_HOME, LV_SYMBOL_HOME " HOME");
 
+    // Grid direction text, right of the grid node
     subGrid = label(scr, &lv_font_montserrat_14, MUTED, "");
     lv_obj_set_width(subGrid, 140);
-    lv_obj_set_style_text_align(subGrid, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(subGrid, 76 - 70, HUB_Y + NODE_D / 2 + 6);
+    lv_obj_set_style_text_align(subGrid, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_pos(subGrid, GRID_X + NODE_D / 2 + 12, GRID_Y - 8);
 
     // Powerwall: SOC arc around the node, % inside
     lv_obj_t *battCircle;
-    lv_obj_t *battVal = node(HUB_X, 392, C_BATT, LV_SYMBOL_BATTERY_FULL " POWERWALL", &battCircle);
+    lv_obj_t *battVal = node(BATT_X, BATT_Y, C_BATT, LV_SYMBOL_BATTERY_FULL " POWERWALL", &battCircle);
     lv_obj_add_flag(battVal, LV_OBJ_FLAG_HIDDEN);
     valSoc = label(battCircle, &lv_font_montserrat_28, TEXT, "--%");
     lv_obj_align(valSoc, LV_ALIGN_CENTER, 0, 12);
     socArc = lv_arc_create(scr);
-    lv_obj_set_size(socArc, NODE_D + 22, NODE_D + 22);
-    lv_obj_set_pos(socArc, HUB_X - (NODE_D + 22) / 2, 392 - (NODE_D + 22) / 2);
+    lv_obj_set_size(socArc, ARC_D, ARC_D);
+    lv_obj_set_pos(socArc, BATT_X - ARC_D / 2, BATT_Y - ARC_D / 2);
     lv_arc_set_rotation(socArc, 270);
     lv_arc_set_bg_angles(socArc, 0, 360);
     lv_arc_set_range(socArc, 0, 100);
@@ -205,10 +224,11 @@ void uiCreate() {
     lv_obj_set_style_arc_width(socArc, 7, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(socArc, C_BATT, LV_PART_INDICATOR);
 
+    // Battery state, centred under the SOC ring
     subBatt = label(scr, &lv_font_montserrat_14, MUTED, "");
-    lv_obj_set_width(subBatt, 160);
-    lv_obj_set_style_text_align(subBatt, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_pos(subBatt, HUB_X + (NODE_D + 22) / 2 + 8, 392 - 8);
+    lv_obj_set_width(subBatt, 150);
+    lv_obj_set_style_text_align(subBatt, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(subBatt, BATT_X - 75, BATT_Y + ARC_D / 2 + 6);
 
     // Top bar
     lblTime = label(scr, &lv_font_montserrat_28, TEXT, "--:--");
@@ -237,7 +257,7 @@ void uiCreate() {
     lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
 
     lastAnimMs = lv_tick_get();
-    lv_timer_create(animTick, 33, nullptr);
+    lv_timer_create(animTick, LV_DEF_REFR_PERIOD, nullptr); // move dots every frame
 }
 
 void uiRefresh() {
@@ -251,53 +271,52 @@ void uiRefresh() {
     struct tm tm;
     if (getLocalTime(&tm, 0)) {
         strftime(buf, sizeof(buf), "%H:%M", &tm);
-        lv_label_set_text(lblTime, buf);
+        setText(lblTime, buf);
         strftime(buf, sizeof(buf), "%a %d %b", &tm);
-        lv_label_set_text(lblDate, buf);
+        setText(lblDate, buf);
     }
 
     if (n.wifiUp) {
         snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %s  %d dBm", n.ssid, n.rssi);
-        lv_obj_set_style_text_color(lblWifi, MUTED, 0);
+        if (!lv_color_eq(lv_obj_get_style_text_color(lblWifi, LV_PART_MAIN), MUTED)) lv_obj_set_style_text_color(lblWifi, MUTED, 0);
     } else {
         snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " offline");
-        lv_obj_set_style_text_color(lblWifi, C_ALERT, 0);
+        if (!lv_color_eq(lv_obj_get_style_text_color(lblWifi, LV_PART_MAIN), C_ALERT)) lv_obj_set_style_text_color(lblWifi, C_ALERT, 0);
     }
-    lv_label_set_text(lblWifi, buf);
+    setText(lblWifi, buf);
 
     if (stale) {
-        lv_label_set_text(valSolar, "--");
-        lv_label_set_text(valGrid, "--");
-        lv_label_set_text(valHome, "--");
-        lv_label_set_text(subGrid, "");
-        lv_label_set_text(subBatt, "");
-        if (!d.valid) lv_label_set_text(valSoc, "--%");
-        lv_label_set_text(lblStatus, d.error[0] ? d.error : "Waiting for Powerwall...");
+        setText(valSolar, "--");
+        setText(valGrid, "--");
+        setText(valHome, "--");
+        setText(subGrid, "");
+        setText(subBatt, "");
+        if (!d.valid) setText(valSoc, "--%");
+        setText(lblStatus, d.error[0] ? d.error : "Waiting for Powerwall...");
         lv_obj_set_style_text_color(lblStatus, d.error[0] ? C_ALERT : MUTED, 0);
     } else {
         formatPower(buf, sizeof(buf), d.solarW);
-        lv_label_set_text(valSolar, buf);
+        setText(valSolar, buf);
         formatPower(buf, sizeof(buf), d.siteW);
-        lv_label_set_text(valGrid, buf);
+        setText(valGrid, buf);
         formatPower(buf, sizeof(buf), d.loadW);
-        lv_label_set_text(valHome, buf);
+        setText(valHome, buf);
 
-        lv_label_set_text(subGrid, fabsf(d.siteW) < MIN_FLOW_W ? "" : d.siteW > 0 ? "Importing" : "Exporting");
+        setText(subGrid, fabsf(d.siteW) < MIN_FLOW_W ? "" : d.siteW > 0 ? "Importing" : "Exporting");
 
         snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(d.soc));
-        lv_label_set_text(valSoc, buf);
-        lv_arc_set_value(socArc, (int)lroundf(d.soc));
+        setText(valSoc, buf);
+        if (lv_arc_get_value(socArc) != (int)lroundf(d.soc)) lv_arc_set_value(socArc, (int)lroundf(d.soc));
         char pw[16];
         formatPower(pw, sizeof(pw), d.batteryW);
         if (fabsf(d.batteryW) < MIN_FLOW_W) snprintf(buf, sizeof(buf), "Idle");
         else snprintf(buf, sizeof(buf), "%s\n%s", d.batteryW > 0 ? "Discharging" : "Charging", pw);
-        lv_label_set_text(subBatt, buf);
+        setText(subBatt, buf);
 
-        lv_label_set_text(lblStatus, "");
+        setText(lblStatus, "");
     }
 
-    if (!stale && !d.gridConnected) lv_obj_remove_flag(banner, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(banner, LV_OBJ_FLAG_HIDDEN);
+    setHidden(banner, stale || d.gridConnected);
 
     // Flow directions (positive = node -> hub)
     linkSet(links[L_SOLAR], d.solarW, stale);

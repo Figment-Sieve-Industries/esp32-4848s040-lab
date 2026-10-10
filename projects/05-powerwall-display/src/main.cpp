@@ -22,6 +22,10 @@ void setBacklightLevel(uint8_t level) { board4848::setBacklight(level); }
 
 static void refreshCb(lv_timer_t *) { uiRefresh(); }
 
+// Frame counter for the serial heartbeat (display refreshes that actually rendered something)
+static volatile uint32_t s_frames;
+static void frameCb(lv_event_t *) { s_frames++; }
+
 static void halt(const char *msg) {
     Serial.println(msg);
     while (true) delay(1000);
@@ -38,7 +42,9 @@ void setup() {
 
     bool hasTouch = touch.begin();
     touch.setRotation(SCREEN_ROTATION);
-    if (!board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr)) halt("LVGL draw buffer alloc failed");
+    lv_display_t *disp = board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr);
+    if (!disp) halt("LVGL draw buffer alloc failed");
+    lv_display_add_event_cb(disp, frameCb, LV_EVENT_REFR_READY, nullptr);
 
     uiCreate();
     powerwallStart(2000);
@@ -49,18 +55,21 @@ void setup() {
 }
 
 void loop() {
-    lv_timer_handler();
-    delay(5);
+    // Sleep only until the next LVGL timer is due (capped), so frames aren't delayed
+    uint32_t idle = lv_timer_handler();
+    delay(idle < 5 ? idle : 5);
 
     // Serial heartbeat every 10 s
     static uint32_t last;
     if (millis() - last > 10000) {
         last = millis();
+        uint32_t frames = s_frames;
+        s_frames = 0;
         PwData d = powerwallData();
         NetStatus n = networkStatus();
-        Serial.printf("[%s %d dBm] solar %.0f home %.0f grid %.0f batt %.0f soc %.1f%% %s %s | heap %lu\n",
+        Serial.printf("[%s %d dBm] solar %.0f home %.0f grid %.0f batt %.0f soc %.1f%% %s %s | heap %lu | %.1f fps\n",
                       n.wifiUp ? n.ssid : "offline", n.rssi, d.solarW, d.loadW, d.siteW, d.batteryW, d.soc,
                       d.gridConnected ? "on-grid" : "OFF-GRID", d.error,
-                      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+                      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), frames / 10.0f);
     }
 }
