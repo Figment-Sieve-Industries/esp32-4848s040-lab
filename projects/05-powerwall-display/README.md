@@ -42,3 +42,23 @@
 - Result: about 170 KB internal free at boot and ~125 KB while polling.
 
 **Status:** `works on hw` (2026-10-10). Layout (rotation 3, Powerwall left, Grid bottom) confirmed; flow animation ~28 fps, smooth.
+
+## Screens (swipe left / right)
+| # | Screen | Shows |
+|---|---|---|
+| 1 | **B · Power flow** | House hub with chevron flows. Weather card: temperature, scrolling condition, high/low, today's rain chance, animated icon. Grid status. Top bar: Wi-Fi network + dBm |
+| 2 | **G · Today** | Self-powered % ring, solar / home / Powerwall in-out kWh, exported / imported tiles, solar-by-hour bars |
+| 3 | **H · Battery & grid** | SOC, charge/discharge power and time to full/empty (13.5 kWh assumed), grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, grid-services (VPP) badge |
+| 4 | **I · Weather** | Current conditions (feels-like, wind, high/low, rain %), next 12 h in 2 h steps, lifetime totals |
+
+Code: `screen_house.cpp`, `screen_today.cpp`, `screen_health.cpp`, `screen_weather.cpp`. Shared look and helpers: `ui_common.*`. Icons: `icons.*`.
+
+## No flash wear
+- Nothing is written to flash at runtime.
+- **"Today" totals** come from the Powerwall's lifetime counters minus a midnight snapshot. The snapshot is kept in **RTC memory** (`RTC_NOINIT_ATTR`, `energy.cpp`). It survives software restarts and crashes, but not a power cut, the reset button or a reflash; the `EN` reset reports as power-on.
+- **After such a reset**, the screen shows "TODAY SINCE HH:MM" until the next midnight.
+- A future SD card could keep a full history.
+
+## Memory
+- LVGL uses its own 1 MB pool in **PSRAM** (`LV_MEM_POOL_ALLOC` in `lv_conf.h`). With the C heap, every small widget lands in internal RAM, and the four screens left only ~38 KB for TLS.
+- Now: ~188 KB internal free at boot and ~140 KB while polling.

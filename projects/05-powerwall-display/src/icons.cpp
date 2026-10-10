@@ -18,7 +18,7 @@ struct FP {
     float x, y;
 };
 
-void polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float dy = 0) {
+lv_obj_t *polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float dy = 0) {
     auto *buf = (lv_point_precise_t *)lv_malloc(sizeof(lv_point_precise_t) * pts.size());
     int i = 0;
     for (auto p : pts) buf[i++] = {(lv_value_precise_t)((p.x + dx) * c.s), (lv_value_precise_t)((p.y + dy) * c.s)};
@@ -29,7 +29,11 @@ void polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float d
     lv_obj_set_style_line_width(l, c.stroke, 0);
     lv_obj_set_style_line_color(l, c.color, 0);
     lv_obj_set_style_line_rounded(l, true, 0);
+    return l;
 }
+
+// Children flagged as "falling" (rain drops, snowflakes) are animated by iconAnimate()
+void markFalling(lv_obj_t *o) { lv_obj_add_flag(o, LV_OBJ_FLAG_USER_1); }
 
 // Arc of radius r around (cx, cy); angles in degrees, 0 = 3 o'clock, clockwise.
 void arc(const Ctx &c, float cx, float cy, float r, int a0, int a1) {
@@ -123,6 +127,19 @@ void draw(lv_obj_t *cont, Icon icon, lv_color_t color, float stroke) {
         lv_obj_set_user_data(cont, fill); // for iconSetBatteryLevel
         break;
     }
+    case Icon::Drop:
+        polyline(c, {{12, 3}, {7.6f, 13}});
+        polyline(c, {{12, 3}, {16.4f, 13}});
+        arc(c, 12, 15, 5, 335, 205);
+        break;
+    case Icon::ArrowUp:
+        polyline(c, {{12, 20}, {12, 5}});
+        polyline(c, {{6, 11}, {12, 5}, {18, 11}});
+        break;
+    case Icon::ArrowDown:
+        polyline(c, {{12, 4}, {12, 19}});
+        polyline(c, {{6, 13}, {12, 19}, {18, 13}});
+        break;
     case Icon::Wifi:
         arc(c, 12, 19.8f, 15, 228, 312);
         arc(c, 12, 19.8f, 10, 226, 314);
@@ -153,15 +170,15 @@ void draw(lv_obj_t *cont, Icon icon, lv_color_t color, float stroke) {
         break;
     case Icon::Rain:
         cloud(c, -3);
-        polyline(c, {{9, 18.5f}, {8, 21.5f}});
-        polyline(c, {{13, 18.5f}, {12, 21.5f}});
-        polyline(c, {{17, 18.5f}, {16, 21.5f}});
+        markFalling(polyline(c, {{9, 18.5f}, {8, 21.5f}}));
+        markFalling(polyline(c, {{13, 18.5f}, {12, 21.5f}}));
+        markFalling(polyline(c, {{17, 18.5f}, {16, 21.5f}}));
         break;
     case Icon::Snow:
         cloud(c, -3);
-        circle(c, 8.5f, 20, 0.9f, true);
-        circle(c, 12.5f, 21.5f, 0.9f, true);
-        circle(c, 16.5f, 20, 0.9f, true);
+        markFalling(circle(c, 8.5f, 20, 0.9f, true));
+        markFalling(circle(c, 12.5f, 21.5f, 0.9f, true));
+        markFalling(circle(c, 16.5f, 20, 0.9f, true));
         break;
     case Icon::Thunder:
         cloud(c, -3);
@@ -183,6 +200,55 @@ lv_obj_t *iconCreate(lv_obj_t *parent, Icon icon, int size, lv_color_t color, fl
 }
 
 void iconSet(lv_obj_t *container, Icon icon, lv_color_t color, float stroke) { draw(container, icon, color, stroke); }
+
+namespace {
+void driftX(void *o, int32_t v) { lv_obj_set_style_translate_x((lv_obj_t *)o, v, 0); }
+void breathe(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
+// v: 0..100 -> fall 0..3 px (scaled) while fading in then out
+void fall(void *o, int32_t v) {
+    auto *obj = (lv_obj_t *)o;
+    lv_obj_t *icon = lv_obj_get_parent(obj);
+    int dist = lv_obj_get_style_width(icon, LV_PART_MAIN) / 8;
+    lv_obj_set_style_translate_y(obj, dist * v / 100, 0);
+    lv_obj_set_style_opa(obj, (lv_opa_t)(v < 30 ? v * 255 / 30 : 255 - (v - 30) * 255 / 70), 0);
+}
+void loopAnim(lv_obj_t *obj, lv_anim_exec_xcb_t cb, int32_t a, int32_t b, uint32_t ms, bool reverse, uint32_t delay) {
+    lv_anim_t an;
+    lv_anim_init(&an);
+    lv_anim_set_var(&an, obj);
+    lv_anim_set_exec_cb(&an, cb);
+    lv_anim_set_values(&an, a, b);
+    lv_anim_set_duration(&an, ms);
+    if (reverse) lv_anim_set_playback_duration(&an, ms);
+    lv_anim_set_delay(&an, delay);
+    lv_anim_set_repeat_count(&an, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&an, reverse ? lv_anim_path_ease_in_out : lv_anim_path_linear);
+    lv_anim_start(&an);
+}
+} // namespace
+
+void iconAnimate(lv_obj_t *container, Icon icon) {
+    lv_anim_delete(container, nullptr);
+    lv_obj_set_style_translate_x(container, 0, 0);
+    lv_obj_set_style_opa(container, LV_OPA_COVER, 0);
+    int size = lv_obj_get_style_width(container, LV_PART_MAIN);
+    switch (icon) {
+    case Icon::Sun:
+        loopAnim(container, breathe, LV_OPA_COVER, 170, 2000, true, 0);
+        break;
+    case Icon::Moon:
+        break;
+    default: // clouds, fog, precipitation: slow drift
+        loopAnim(container, driftX, -size / 14, size / 14, 2000, true, 0);
+        break;
+    }
+    // Falling drops / flakes, staggered
+    uint32_t n = lv_obj_get_child_count(container), k = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *ch = lv_obj_get_child(container, i);
+        if (lv_obj_has_flag(ch, LV_OBJ_FLAG_USER_1)) loopAnim(ch, fall, 0, 100, 1400, false, 450 * k++);
+    }
+}
 
 void iconSetBatteryLevel(lv_obj_t *container, float pct) {
     auto *fill = (lv_obj_t *)lv_obj_get_user_data(container);

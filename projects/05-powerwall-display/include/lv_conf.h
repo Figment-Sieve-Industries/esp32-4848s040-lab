@@ -4,8 +4,12 @@
 
 #define LV_COLOR_DEPTH 16
 
-// C heap: big LVGL allocations go to PSRAM, leaving internal RAM for Wi-Fi/TLS
-#define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
+// LVGL's own heap: a 1 MB pool allocated once from PSRAM. (With the C heap, every allocation
+// under 4 KB - i.e. every widget - lands in internal RAM, which Wi-Fi/TLS needs.)
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
+#define LV_MEM_SIZE (1024 * 1024U)
+#define LV_MEM_POOL_INCLUDE <esp_heap_caps.h>
+#define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
 
 #define LV_DEF_REFR_PERIOD 16
@@ -24,10 +28,14 @@
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 1
+#define LV_FONT_MONTSERRAT_18 1
 #define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_22 1
 #define LV_FONT_MONTSERRAT_26 1
 #define LV_FONT_MONTSERRAT_28 1
 #define LV_FONT_MONTSERRAT_30 1
+#define LV_FONT_MONTSERRAT_40 1
+#define LV_FONT_MONTSERRAT_48 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_16
 
 #define LV_BUILD_EXAMPLES 0

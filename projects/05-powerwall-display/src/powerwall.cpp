@@ -82,7 +82,13 @@ static bool pollOnce(WiFiClientSecure &client) {
     if (s_token.isEmpty() && !login(client)) return false;
 
     JsonDocument filter;
-    for (const char *m : {"site", "battery", "load", "solar"}) filter[m]["instant_power"] = true;
+    for (const char *m : {"site", "battery", "load", "solar"}) {
+        filter[m]["instant_power"] = true;
+        filter[m]["energy_exported"] = true;
+        filter[m]["energy_imported"] = true;
+        filter[m]["instant_average_voltage"] = true;
+        filter[m]["frequency"] = true;
+    }
 
     JsonDocument agg, soe, grid;
     int code = getJson(client, "/api/meters/aggregates", agg, &filter);
@@ -105,10 +111,19 @@ static bool pollOnce(WiFiClientSecure &client) {
     s_data.batteryW = agg["battery"]["instant_power"] | 0.0f;
     s_data.loadW = agg["load"]["instant_power"] | 0.0f;
     s_data.solarW = agg["solar"]["instant_power"] | 0.0f;
+    s_data.voltageV = agg["site"]["instant_average_voltage"] | 0.0f;
+    s_data.frequencyHz = agg["battery"]["frequency"] | 0.0f;
+    s_data.solarExportedWh = agg["solar"]["energy_exported"] | 0.0;
+    s_data.loadImportedWh = agg["load"]["energy_imported"] | 0.0;
+    s_data.siteExportedWh = agg["site"]["energy_exported"] | 0.0;
+    s_data.siteImportedWh = agg["site"]["energy_imported"] | 0.0;
+    s_data.battExportedWh = agg["battery"]["energy_exported"] | 0.0;
+    s_data.battImportedWh = agg["battery"]["energy_imported"] | 0.0;
     if (codeSoe == 200) s_data.soc = soe["percentage"] | s_data.soc;
     if (codeGrid == 200) {
         const char *gs = grid["grid_status"] | "SystemGridConnected";
         s_data.gridConnected = strcmp(gs, "SystemGridConnected") == 0;
+        s_data.gridServicesActive = grid["grid_services_active"] | false;
     }
     s_data.valid = true;
     s_data.updatedMs = millis();
@@ -119,11 +134,12 @@ static bool pollOnce(WiFiClientSecure &client) {
 
 // Open-Meteo current conditions + today's high/low. Returns true on success.
 static bool fetchWeather(WiFiClientSecure &client) {
-    char path[256];
+    char path[512];
     snprintf(path, sizeof(path),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-             "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min"
-             "&forecast_days=1&timezone=auto",
+             "&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m"
+             "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+             "&hourly=temperature_2m,weather_code,is_day&forecast_hours=11&forecast_days=1&timezone=auto",
              (double)WEATHER_LAT, (double)WEATHER_LON);
     HTTPClient http;
     http.begin(client, path);
@@ -144,6 +160,20 @@ static bool fetchWeather(WiFiClientSecure &client) {
     w.isDay = (doc["current"]["is_day"] | 1) == 1;
     w.hiC = doc["daily"]["temperature_2m_max"][0] | 0.0f;
     w.loC = doc["daily"]["temperature_2m_min"][0] | 0.0f;
+    w.feelsC = doc["current"]["apparent_temperature"] | 0.0f;
+    w.windKmh = doc["current"]["wind_speed_10m"] | 0.0f;
+    w.rainPct = doc["daily"]["precipitation_probability_max"][0] | -1;
+    // Hourly from the current hour: take every 2nd entry -> now, +2 ... +10 h
+    JsonArray times = doc["hourly"]["time"];
+    for (int i = 0; i < 6; i++) {
+        int k = i * 2;
+        const char *t = times[k] | ""; // "2026-10-10T13:00"
+        if (strlen(t) < 13) break;
+        w.hours[i].hour = atoi(t + 11);
+        w.hours[i].code = doc["hourly"]["weather_code"][k] | -1;
+        w.hours[i].isDay = (doc["hourly"]["is_day"][k] | 1) == 1;
+        w.hours[i].tempC = doc["hourly"]["temperature_2m"][k] | 0.0f;
+    }
     w.valid = w.code >= 0;
     w.updatedMs = millis();
     xSemaphoreTake(s_lock, portMAX_DELAY);

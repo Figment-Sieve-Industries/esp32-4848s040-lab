@@ -26,3 +26,5 @@
 | `SSL - Memory allocation failed` (-32512) | The Arduino core's mbedTLS allocates **only from internal RAM** (~40–50 KB per TLS session). LVGL speed options (IRAM functions, a big draw buffer) can starve it. In network projects, drop `LV_ATTRIBUTE_FAST_MEM` and use ~48 buffer lines. |
 | JSON from an HTTP API parses as a number / fields are all 0 | Chunked transfer encoding: `deserializeJson(http.getStream())` reads the hex chunk-size line. Use `http.getString()` (de-chunks), or `http.useHTTP10(true)`. |
 | `WiFiMulti: no matching wifi found` but the SSID exists | It's probably 5 GHz-only. The ESP32-S3 is 2.4 GHz only. `05-powerwall-display` prints a scan of what it can see. |
+| Internal RAM drains as you add LVGL screens (TLS then fails) | With `LV_STDLIB_CLIB`, every allocation < 4 KB (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`) goes to internal RAM, i.e. every widget. Use LVGL's builtin heap with `LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM)` and a large `LV_MEM_SIZE`. |
+| HTTP 400 from a URL built with `snprintf` | The buffer was too small and truncated the query string. Size it generously and check the return value. |
