@@ -120,6 +120,8 @@ void pathTick(FlowPath &f, float dt) {
 TopBar topBar;
 lv_obj_t *lblStatusLine;
 lv_obj_t *wCard, *icoWeather, *lblTemp, *lblCond, *lblHiLo, *rainRow, *lblRain, *statusDot, *lblGridStatus;
+lv_obj_t *vppDot, *lblVpp;
+bool vppShownActive = true; // forces the first refresh to style the row
 lv_obj_t *valSolar, *valHome, *valGrid, *valSoc, *icoBatt, *socFill;
 lv_obj_t *chipVolt, *chipHomeVa, *chipGridDir, *chipGridVa, *chipBatt;
 int weatherIconKey = -100;
@@ -305,6 +307,13 @@ lv_obj_t *houseCreate() {
     animPulse(statusDot, 2000);
     lblGridStatus = label(srow, &lv_font_montserrat_14, C_BATT, "Grid connected");
 
+    // VPP / grid-services row: hollow ring when idle, pulsing amber dot during an event
+    lv_obj_t *vrow = row(wCard, 8);
+    vppDot = box(vrow);
+    lv_obj_set_size(vppDot, 9, 9);
+    lv_obj_set_style_radius(vppDot, LV_RADIUS_CIRCLE, 0);
+    lblVpp = label(vrow, &lv_font_montserrat_12, MUTED, "VPP idle");
+
     pageDots(scr, 0);
 
     // Errors / stale data, bottom centre (below the page dots)
@@ -356,6 +365,25 @@ void houseRefresh() {
     }
     setTextColor(lblGridStatus, sc);
     setText(lblGridStatus, stale ? "Grid: no data" : offGrid ? "Off-grid: on battery" : "Grid connected");
+
+    // VPP (grid services) indicator
+    bool vpp = !stale && d.gridServicesActive;
+    if (vpp != vppShownActive) {
+        vppShownActive = vpp;
+        lv_anim_delete(vppDot, nullptr);
+        if (vpp) {
+            lv_obj_set_style_border_width(vppDot, 0, 0);
+            lv_obj_set_style_bg_color(vppDot, C_SOLAR, 0);
+            lv_obj_set_style_bg_opa(vppDot, LV_OPA_COVER, 0);
+            animPulse(vppDot, 1400);
+        } else {
+            lv_obj_set_style_bg_opa(vppDot, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_color(vppDot, MUTED, 0);
+            lv_obj_set_style_border_width(vppDot, 2, 0);
+        }
+        setTextColor(lblVpp, vpp ? C_SOLAR : MUTED);
+        setText(lblVpp, vpp ? "VPP event active" : "VPP idle");
+    }
 
     if (stale) {
         setText(valSolar, "--");
