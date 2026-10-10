@@ -15,6 +15,7 @@
 static WiFiMulti s_wifiMulti;
 static SemaphoreHandle_t s_lock;
 static PwData s_data;
+static WeatherData s_weather;
 static NetStatus s_net;
 static String s_token;
 static uint32_t s_pollMs;
@@ -116,6 +117,42 @@ static bool pollOnce(WiFiClientSecure &client) {
     return true;
 }
 
+// Open-Meteo current conditions + today's high/low. Returns true on success.
+static bool fetchWeather(WiFiClientSecure &client) {
+    char path[256];
+    snprintf(path, sizeof(path),
+             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+             "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min"
+             "&forecast_days=1&timezone=auto",
+             (double)WEATHER_LAT, (double)WEATHER_LON);
+    HTTPClient http;
+    http.begin(client, path);
+    http.setTimeout(8000);
+    int code = http.GET();
+    if (code != 200) {
+        http.end();
+        Serial.printf("Weather: HTTP %d\n", code);
+        return false;
+    }
+    String body = http.getString();
+    http.end();
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) return false;
+    WeatherData w;
+    w.tempC = doc["current"]["temperature_2m"] | 0.0f;
+    w.code = doc["current"]["weather_code"] | -1;
+    w.isDay = (doc["current"]["is_day"] | 1) == 1;
+    w.hiC = doc["daily"]["temperature_2m_max"][0] | 0.0f;
+    w.loC = doc["daily"]["temperature_2m_min"][0] | 0.0f;
+    w.valid = w.code >= 0;
+    w.updatedMs = millis();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_weather = w;
+    xSemaphoreGive(s_lock);
+    Serial.printf("Weather: %.1f C code %d (H %.1f L %.1f)\n", w.tempC, w.code, w.hiC, w.loC);
+    return w.valid;
+}
+
 static void netTask(void *) {
     WiFiClientSecure client;
     client.setInsecure(); // gateway uses a self-signed certificate
@@ -148,6 +185,13 @@ static void netTask(void *) {
 
         uint32_t start = millis();
         pollOnce(client);
+
+        // Weather every 15 min (retry after 1 min on failure). Switching host closes the
+        // gateway connection first, so only one TLS session exists at a time.
+        static uint32_t nextWeather = 0;
+        if ((int32_t)(millis() - nextWeather) >= 0) {
+            nextWeather = millis() + (fetchWeather(client) ? 15 * 60 * 1000UL : 60 * 1000UL);
+        }
         uint32_t spent = millis() - start;
         vTaskDelay(pdMS_TO_TICKS(spent < s_pollMs ? s_pollMs - spent : 100));
     }
@@ -169,6 +213,13 @@ PwData powerwallData() {
     PwData d = s_data;
     xSemaphoreGive(s_lock);
     return d;
+}
+
+WeatherData weatherData() {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    WeatherData w = s_weather;
+    xSemaphoreGive(s_lock);
+    return w;
 }
 
 NetStatus networkStatus() {

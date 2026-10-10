@@ -13,6 +13,14 @@ struct PwData {
     char error[48] = "";     // last error, empty when OK
 };
 
+struct WeatherData {
+    bool valid = false;
+    float tempC = 0, hiC = 0, loC = 0;
+    int code = -1;           // WMO weather code
+    bool isDay = true;
+    uint32_t updatedMs = 0;
+};
+
 struct NetStatus {
     bool wifiUp = false;
     char ssid[33] = "";
@@ -20,8 +28,10 @@ struct NetStatus {
 };
 
 // Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS) and the polling task on core 0.
+// The same task fetches Open-Meteo weather every 15 min (one TLS session at a time).
 void powerwallStart(uint32_t pollMs = 2000);
 
 // Thread-safe copies of the latest state.
 PwData powerwallData();
 NetStatus networkStatus();
+WeatherData weatherData();

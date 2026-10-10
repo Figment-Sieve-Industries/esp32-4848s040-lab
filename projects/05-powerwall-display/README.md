@@ -2,7 +2,7 @@
 
 **Goal:** a live Tesla Powerwall 3 power-flow display, read straight from the gateway on the home LAN. No cloud, no server.
 
-**Layout:** Solar top, Powerwall (SOC ring) left, Home right, Grid bottom.
+**Layout:** design B "house hub" (see the design canvas): house centre, Solar top-left, Grid bottom-left, Powerwall bottom-right, weather + grid-status card top-right. Chevrons run along elbow lines in the direction of flow. Icons are drawn with LVGL lines and arcs (`icons.cpp`). Weather comes from Open-Meteo every 15 min (`WEATHER_LAT`/`WEATHER_LON` in `secrets.h`).
 
 **What it shows**
 - **Nodes:** Solar, Grid, Home and Powerwall, with live watts.

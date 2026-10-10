@@ -20,11 +20,14 @@
 
 #define LV_USE_SYSMON 0
 
+// Built-in Montserrat: ASCII + degree sign + LVGL symbols (no middle dot)
+#define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_20 1
+#define LV_FONT_MONTSERRAT_26 1
 #define LV_FONT_MONTSERRAT_28 1
-#define LV_FONT_MONTSERRAT_40 1
+#define LV_FONT_MONTSERRAT_30 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_16
 
 #define LV_BUILD_EXAMPLES 0

@@ -20,3 +20,7 @@ static const WifiCred WIFI_NETWORKS[] = {
 
 // POSIX TZ string for the clock (UK shown).
 #define TZ_INFO "GMT0BST,M3.5.0/1,M10.5.0"
+
+// Weather location (Open-Meteo, no API key). Kept here because it's your home location.
+#define WEATHER_LAT 51.5072
+#define WEATHER_LON -0.1276
