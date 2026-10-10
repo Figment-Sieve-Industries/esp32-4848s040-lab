@@ -51,7 +51,7 @@ Hardware rotation isn't available on an RGB panel. Rotation happens in software:
 
 ## Performance tips
 - The framebuffer is 480×480×2 = 460 KB, in PSRAM.
-- With LVGL, `board4848::lvglBegin()` uses a 48-line partial buffer in internal RAM. Direct mode (rendering into the PSRAM framebuffer) needs `auto_flush=false` or `gfx->flush(true)` for cache writeback.
+- With LVGL, `board4848::lvglBegin()` uses a 120-line partial buffer in internal RAM. Together with `-O2` and `LV_ATTRIBUTE_FAST_MEM`, that gave +17% average FPS and up to 2× on heavy scenes. A double-framebuffer path exists (`lvglBeginDoubleBuffered`) but measured **slower**. See the [hardware log](hardware-log.md) experiments. Direct mode (rendering into the PSRAM framebuffer) needs `auto_flush=false` or `gfx->flush(true)` for cache writeback.
 - **Bounce buffers are on by default** (`B4848_LCD_BOUNCE_PX` = 480×10 px, about 19 KB of internal RAM for two buffers).
   - **Verified on hardware (2026-10-10):** without them, the whole screen flickered while drawing with a finger. The CPU writing the PSRAM framebuffer starved the LCD DMA. With them, the image is stable.
   - Pass `initDisplay(rotation, 0)` to disable them, or a larger value to go further. The value must divide 480×480.

@@ -43,3 +43,50 @@ Setup: `03-lvgl-demos`, LVGL 9.5.0, Arduino core 3.2.1 (`-Os`), partial render w
 | **All scenes avg.** | **87%** | **30** | 44 | 35 | 9 |
 
 Reading: a full-screen flush (CPU copy of 460 KB into PSRAM) costs about 20 ms. Text and opa layers are render-bound. Small-area updates run at 44–60 FPS. Optimisation candidates, in order of effort: `-O2` + `LV_ATTRIBUTE_FAST_MEM`; a bigger draw buffer; double framebuffers with vsync swap (needs our own `esp_lcd` setup, no copy, no tearing); esp_lvgl_port SIMD blend routines.
+
+### LVGL performance experiments, unit 1 (2026-10-10)
+These were automated: the `bench` env of `03-lvgl-demos` boots straight into the Benchmark, and serial is captured and parsed. Each variant adds to the previous one unless noted. v1 (`-O2` via build_flags alone) is omitted: it produced a **byte-identical** firmware, because the core appends `-Os` after build_flags.
+
+Cells: FPS (CPU%) [render ms / flush ms]
+
+| Scene | v0 baseline | v2 +fast mem | v3 +120 lines | v4 +2 draw threads | **v5 +real -O2** | v6 2 FB direct | v7 2 FB full |
+|---|---|---|---|---|---|---|---|
+| Empty screen | 21 (83%) [18/20] | 21 (83%) [17/20] | 24 (83%) [12/20] | 22 (100%) [16/19] | 25 (84%) [9/21] | 19 (84%) [30/12] | 19 (85%) [29/12] |
+| Moving wallpaper | 16 (95%) [34/21] | 17 (94%) [32/20] | 16 (94%) [32/20] | 17 (100%) [30/21] | 17 (96%) [30/20] | 10 (96%) [85/3] | 10 (96%) [81/8] |
+| Single rectangle | 59 (47%) [1/2] | 60 (56%) [1/2] | 61 (55%) [1/2] | 61 (100%) [1/2] | 60 (40%) [1/2] | 42 (89%) [4/16] | 21 (95%) [32/11] |
+| Multiple rectangles | 35 (88%) [10/12] | 37 (87%) [10/11] | 37 (87%) [9/12] | 33 (100%) [11/12] | 40 (87%) [9/10] | 35 (90%) [17/5] | 19 (93%) [42/4] |
+| Multiple RGB images | 54 (74%) [6/3] | 56 (74%) [6/2] | 56 (74%) [6/2] | 56 (100%) [7/2] | 56 (72%) [5/2] | 20 (93%) [21/19] | 19 (95%) [42/3] |
+| Multiple ARGB images | 41 (85%) [14/4] | 45 (85%) [12/3] | 44 (84%) [12/3] | 44 (100%) [12/3] | 46 (89%) [12/3] | 20 (94%) [26/15] | 14 (96%) [49/16] |
+| Rotated ARGB images | 45 (83%) [15/1] | 45 (83%) [15/2] | 45 (83%) [15/2] | 45 (100%) [15/2] | 47 (82%) [15/2] | 35 (90%) [18/3] | 14 (97%) [46/19] |
+| Multiple labels | 27 (91%) [24/6] | 29 (91%) [21/7] | 29 (91%) [21/7] | 27 (100%) [24/7] | 32 (93%) [22/2] | 19 (93%) [27/15] | 17 (91%) [43/16] |
+| Screen sized text | 7 (97%) [107/21] | 7 (97%) [105/21] | 10 (96%) [64/21] | 8 (100%) [92/20] | 11 (97%) [60/20] | 10 (96%) [69/20] | 10 (96%) [69/20] |
+| Multiple arcs | 58 (57%) [4/0] | 59 (61%) [4/0] | 59 (61%) [4/0] | 59 (100%) [4/0] | 59 (47%) [2/1] | 38 (90%) [6/13] | 21 (95%) [36/5] |
+| Containers | 47 (75%) [14/3] | 49 (71%) [14/3] | 55 (65%) [10/3] | 51 (100%) [13/3] | 57 (51%) [8/3] | 21 (92%) [27/13] | 14 (96%) [56/8] |
+| Containers with overlay | 13 (94%) [51/15] | 14 (93%) [47/15] | 15 (93%) [41/16] | 14 (100%) [49/15] | 16 (92%) [37/17] | 12 (95%) [59/9] | 10 (97%) [82/7] |
+| Containers with opa | 39 (83%) [20/3] | 43 (80%) [17/3] | 50 (76%) [14/3] | 43 (100%) [17/3] | 54 (63%) [12/3] | 18 (95%) [30/12] | 14 (97%) [61/3] |
+| Containers with opa_layer | 10 (94%) [83/7] | 10 (96%) [77/7] | 15 (92%) [52/5] | 12 (100%) [67/6] | 21 (91%) [40/4] | 9 (96%) [76/11] | 8 (97%) [96/16] |
+| Containers with scrolling | 10 (97%) [65/21] | 11 (96%) [58/21] | 14 (96%) [44/21] | 11 (100%) [59/20] | 15 (96%) [40/20] | 10 (97%) [73/16] | 10 (97%) [73/16] |
+| Widgets demo | 6 (97%) [96/18] | 7 (97%) [87/17] | 8 (97%) [62/17] | 6 (100%) [90/17] | 9 (97%) [56/17] | 7 (97%) [82/12] | 6 (98%) [114/11] |
+| All scenes avg. | 30 (83%) [35/9] | 31 (84%) [32/9] | 33 (82%) [24/9] | 31 (100%) [31/9] | 35 (79%) [22/9] | 20 (92%) [40/12] | 14 (95%) [59/10] |
+
+| Variant | Free internal heap at boot |
+|---|---|
+| v0 baseline | 267 KB |
+| v2 + `LV_ATTRIBUTE_FAST_MEM` (IRAM) | 212 KB |
+| v3 + 120-line draw buffer | 143 KB |
+| v5 + real `-O2` (`build_unflags = -Os`) | 87 KB |
+| v6/v7 double framebuffer (no draw buffer) | 314 KB (but +460 KB PSRAM) |
+
+**Conclusions**
+- **Confirmed after making them the shared defaults:** `03` bench env = 35 FPS at 76% CPU, render 21 ms, 86 KB internal heap free.
+- **v5 is the new default** (`common/platformio-base.ini` + `lv_conf.h` + `B4848_LVGL_BUF_LINES` 120):
+  - average 30 → 35 FPS, render 35 → 22 ms
+  - heavy scenes up 50–110%: opa_layer 10 → 21 FPS, text 7 → 11, containers with opa 39 → 54
+- **Bigger buffer was the single biggest win** (render −31%), then `-O2`, then IRAM.
+- **Two LVGL draw threads (v4) are slower:** threading overhead outweighs the second core for this workload, and the CPU reading is pinned at 100%.
+- **Double framebuffers (v6/v7, project 04) are slower:**
+  - rendering straight into PSRAM is much slower than into internal RAM
+  - each frame also waits up to a refresh (~24 ms at 42 Hz)
+  - the swap itself works: 0 timeouts, presents synchronised
+  - kept as an opt-in path only in case tearing matters for a specific UI
+- **Remaining limit:** full-screen flush ≈ 20 ms (CPU copy into the PSRAM framebuffer). Untried next steps: async DMA copy (`esp_async_memcpy`) overlapping render and flush with 2 draw buffers; esp_lvgl_port SIMD blend.

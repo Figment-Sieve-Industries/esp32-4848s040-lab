@@ -10,6 +10,12 @@
 #define LV_DEF_REFR_PERIOD 16
 #define LV_USE_OS LV_OS_NONE
 
+// LVGL's hot functions in IRAM (measured: ~5-10% faster rendering, costs ~55 KB internal RAM)
+#if !defined(__ASSEMBLY__)
+#include "esp_attr.h"
+#define LV_ATTRIBUTE_FAST_MEM IRAM_ATTR
+#endif
+
 #define LV_USE_LOG 1
 #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
 #define LV_LOG_PRINTF 1

@@ -25,6 +25,7 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - **New projects:** numbered `NN-name`. Copy `02-lvgl-hello` for UI work or `01-hello-display-touch` for plain graphics, without `.pio/`. Add a row to `projects/README.md`.
 - **Status vocabulary:** `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" is not "works on hw"; only claim hardware results the user has reported.
 - **Arduino vs ESP-IDF** is documented as reasoning (docs/06), not a decision. Don't present it as decided.
+- **Performance defaults are measured** (docs/hardware-log.md): `-O2` with `build_unflags = -Os`, `LV_ATTRIBUTE_FAST_MEM` in lv_conf, a 120-line LVGL buffer. Benchmark changes with `03-lvgl-demos`'s `bench` env before changing them. Double framebuffers and 2 draw threads were measured slower.
 
 ## Library API (`#include <Board4848S040.h>`, namespace `board4848`)
 - `Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX)`: ST7701 init over 3-wire SPI, 12 MHz RGB, framebuffer in PSRAM, bounce buffers on (they stop the flicker; verified on hardware)

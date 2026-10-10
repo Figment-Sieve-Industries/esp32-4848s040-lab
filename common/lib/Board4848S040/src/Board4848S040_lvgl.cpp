@@ -3,7 +3,6 @@
 
 namespace board4848 {
 
-static constexpr uint32_t BUF_LINES = 48; // 1/10 of the screen
 static Arduino_RGB_Display *s_gfx;
 static Touch *s_touch;
 
@@ -36,14 +35,14 @@ static void touchReadCb(lv_indev_t *, lv_indev_data_t *data) {
     data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
-lv_display_t *lvglBegin(Arduino_RGB_Display *gfx, Touch *touch) {
+lv_display_t *lvglBegin(Arduino_RGB_Display *gfx, Touch *touch, uint16_t bufLines) {
     s_gfx = gfx;
     s_touch = touch;
 
     lv_init();
     lv_tick_set_cb(tickCb);
 
-    const size_t bufBytes = (size_t)gfx->width() * BUF_LINES * 2;
+    const size_t bufBytes = (size_t)gfx->width() * bufLines * 2;
     uint8_t *buf = (uint8_t *)heap_caps_malloc(bufBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!buf) buf = (uint8_t *)heap_caps_malloc(bufBytes, MALLOC_CAP_8BIT); // PSRAM fallback: slower
     if (!buf) return nullptr;

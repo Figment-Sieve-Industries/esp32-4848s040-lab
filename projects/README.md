@@ -9,6 +9,7 @@ This is the single list of projects; the root README links here. Each project is
 | 01 | [01-hello-display-touch](01-hello-display-touch/) | works on hw | Colour test, finger-paint, touch coordinates on screen and serial. Plain Arduino_GFX. |
 | 02 | [02-lvgl-hello](02-lvgl-hello/) | works on hw | LVGL 9.5 base: button, backlight slider, FPS monitor. **Copy this for UI projects.** |
 | 03 | [03-lvgl-demos](03-lvgl-demos/) | works on hw | Touch launcher for LVGL's official demos: Widgets, Music (square), Benchmark, Stress. Benchmark results are in the [hardware log](../docs/hardware-log.md). |
+| 04 | [04-lvgl-fb2-bench](04-lvgl-fb2-bench/) | works on hw | Experiment: double framebuffers + vsync swap. Works, but measured slower (20 vs 35 FPS). See the hardware log. |
 
 Status values: `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" means it compiles; it has **not** been run on a board yet.
 
@@ -20,7 +21,7 @@ Numbers are assigned when a project starts.
 | sd-audio | microSD (SPI, after display init) + I2S to the NS4168. Needs the 0 Ω link move R25–27 → R21–23. Prior art: the vendor music demo, Yoradio. |
 | wifi-ota | Wi-Fi provisioning + ArduinoOTA + mDNS; second env with `upload_protocol = espota` |
 | esphome-minimal | Minimal ESPHome YAML (display, touch, backlight, OTA) for Home Assistant |
-| LVGL performance | From the benchmark: `-O2` + `LV_ATTRIBUTE_FAST_MEM`, a bigger draw buffer, then double framebuffers with vsync swap (no 20 ms flush copy, no tearing), then esp_lvgl_port SIMD blend. Measure each step with 03's Benchmark. |
+| LVGL performance, round 2 | Done so far: `-O2`, IRAM, 120-line buffer (35 FPS); double FB and 2 draw threads were slower. Next: async DMA flush (`esp_async_memcpy`) with 2 draw buffers to hide the 20 ms copy, then esp_lvgl_port SIMD blend. |
 | LovyanGFX alternative | Port the shared lib to LovyanGFX (`Panel_ST7701_guition_esp32_4848S040`, see `reference/ESP32-4848S040-LVGL-LGFX`) and compare speed |
 
 ## Building

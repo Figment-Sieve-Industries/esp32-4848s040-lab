@@ -99,6 +99,8 @@ void setup() {
     bool hasTouch = touch.begin();
     if (!hasTouch) Serial.println("GT911 not found");
     if (!board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr)) halt("LVGL draw buffer alloc failed");
+    Serial.printf("Free internal heap: %lu, PSRAM: %lu\n", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                  (unsigned long)ESP.getFreePsram());
 
     Preferences prefs;
     prefs.begin("demos", false);
@@ -106,6 +108,9 @@ void setup() {
     prefs.putInt("choice", LAUNCHER); // one-shot
     prefs.end();
 
+#ifdef DEMO_AUTORUN
+    choice = DEMO_AUTORUN; // bench env: start straight into a demo
+#endif
     if (choice >= 0 && choice < DEMO_COUNT) {
         Serial.printf("Running demo: %s\n", DEMOS[choice].name);
         DEMOS[choice].run();

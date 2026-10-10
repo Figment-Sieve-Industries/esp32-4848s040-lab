@@ -10,7 +10,14 @@
 #define LV_USE_STDLIB_STRING LV_STDLIB_CLIB
 
 #define LV_DEF_REFR_PERIOD 16
+// Single-threaded. 2 draw threads (LV_OS_FREERTOS + LV_DRAW_SW_DRAW_UNIT_CNT 2) were measured slower here.
 #define LV_USE_OS LV_OS_NONE
+
+// LVGL's hot functions in IRAM (measured: ~5-10% faster rendering, costs ~55 KB internal RAM)
+#if !defined(__ASSEMBLY__)
+#include "esp_attr.h"
+#define LV_ATTRIBUTE_FAST_MEM IRAM_ATTR
+#endif
 
 #define LV_USE_LOG 1
 #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
