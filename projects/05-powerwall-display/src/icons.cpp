@@ -18,11 +18,15 @@ struct FP {
     float x, y;
 };
 
+// Icon parts must never swallow taps: the screen handles them (brightness tap).
+void inert(lv_obj_t *o) { lv_obj_remove_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE)); }
+
 lv_obj_t *polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float dy = 0) {
     auto *buf = (lv_point_precise_t *)lv_malloc(sizeof(lv_point_precise_t) * pts.size());
     int i = 0;
     for (auto p : pts) buf[i++] = {(lv_value_precise_t)((p.x + dx) * c.s), (lv_value_precise_t)((p.y + dy) * c.s)};
     lv_obj_t *l = lv_line_create(c.parent);
+    inert(l);
     lv_line_set_points(l, buf, pts.size());
     lv_obj_add_event_cb(l, freePoints, LV_EVENT_DELETE, buf);
     lv_obj_set_pos(l, 0, 0);
@@ -43,7 +47,7 @@ void arc(const Ctx &c, float cx, float cy, float r, int a0, int a1) {
     lv_obj_set_pos(a, (int)lroundf(cx * c.s - d / 2.0f), (int)lroundf(cy * c.s - d / 2.0f));
     lv_arc_set_bg_angles(a, a0, a1);
     lv_obj_remove_style(a, nullptr, LV_PART_KNOB);
-    lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
+    inert(a);
     lv_obj_set_style_pad_all(a, 0, 0);
     lv_obj_set_style_arc_width(a, c.stroke, LV_PART_MAIN);
     lv_obj_set_style_arc_color(a, c.color, LV_PART_MAIN);
@@ -56,6 +60,7 @@ lv_obj_t *circle(const Ctx &c, float cx, float cy, float r, bool fill = false) {
     int d = (int)lroundf(2 * r * c.s + (fill ? 0 : c.stroke));
     lv_obj_t *o = lv_obj_create(c.parent);
     lv_obj_remove_style_all(o);
+    inert(o);
     lv_obj_set_size(o, d, d);
     lv_obj_set_pos(o, (int)lroundf(cx * c.s - d / 2.0f), (int)lroundf(cy * c.s - d / 2.0f));
     lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
@@ -72,6 +77,7 @@ lv_obj_t *circle(const Ctx &c, float cx, float cy, float r, bool fill = false) {
 lv_obj_t *rect(const Ctx &c, float x, float y, float w, float h, float r, bool fill) {
     lv_obj_t *o = lv_obj_create(c.parent);
     lv_obj_remove_style_all(o);
+    inert(o);
     float pad = fill ? 0 : c.stroke / 2.0f;
     lv_obj_set_pos(o, (int)lroundf(x * c.s - pad), (int)lroundf(y * c.s - pad));
     lv_obj_set_size(o, (int)lroundf(w * c.s + 2 * pad), (int)lroundf(h * c.s + 2 * pad));

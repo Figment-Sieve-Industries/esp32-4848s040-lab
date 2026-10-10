@@ -335,8 +335,14 @@ void houseRefresh() {
 
     topBarUpdate(topBar);
 
-    // Weather
-    if (w.valid) {
+    // Weather (stale after WEATHER_STALE_MS: show placeholders rather than old conditions)
+    bool wStale = !w.valid || millis() - w.updatedMs > WEATHER_STALE_MS;
+    if (wStale) {
+        setText(lblTemp, "--");
+        setText(lblCond, w.valid ? "Weather out of date" : "Weather");
+        setText(lblHiLo, "");
+        setHidden(rainRow, true);
+    } else {
         snprintf(buf, sizeof(buf), "%d\xC2\xB0", (int)lroundf(w.tempC)); // UTF-8 degree sign
         setText(lblTemp, buf);
         setText(lblCond, weatherText(w.code));
@@ -394,7 +400,8 @@ void houseRefresh() {
         setText(chipGridDir, "--");
         setText(chipGridVa, "--");
         setText(chipBatt, "--");
-        if (!d.valid) setText(valSoc, "--%");
+        setText(valSoc, "--%"); // don't leave a frozen SOC on screen
+        setWidth(socFill, 0);
         setText(lblStatusLine, d.error[0] ? d.error : "Waiting for Powerwall...");
     } else {
         formatPower(buf, sizeof(buf), d.solarW);
@@ -421,10 +428,15 @@ void houseRefresh() {
         setText(chipGridVa, buf);
 
         // Powerwall
-        snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(d.soc));
-        setText(valSoc, buf);
-        iconSetBatteryLevel(icoBatt, d.soc);
-        setWidth(socFill, (int32_t)lroundf(SOC_BAR_W * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
+        if (d.socValid) {
+            snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(d.soc));
+            setText(valSoc, buf);
+            iconSetBatteryLevel(icoBatt, d.soc);
+            setWidth(socFill, (int32_t)lroundf(SOC_BAR_W * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
+        } else {
+            setText(valSoc, "--%");
+            setWidth(socFill, 0);
+        }
         char pw[16];
         formatPower(pw, sizeof(pw), d.batteryW);
         if (fabsf(d.batteryW) < MIN_FLOW_W) snprintf(buf, sizeof(buf), "Idle");

@@ -18,7 +18,7 @@ https://github.com/NorthernMan54/ESP32-4848S040/tree/main/ESP32-4848S040/8-Burn%
 | `switch86_lvgl_music.bin` | 3,094,576 B | https://raw.githubusercontent.com/NorthernMan54/ESP32-4848S040/main/ESP32-4848S040/8-Burn%20operation/Burn%20files/switch86_lvgl_music.bin |
 | `4.0_LvglWidgets.bin` | 652,640 B | https://raw.githubusercontent.com/NorthernMan54/ESP32-4848S040/main/ESP32-4848S040/8-Burn%20operation/Burn%20files/4.0_LvglWidgets.bin |
 
-All three are **merged full images**. Each has bootloader magic `0xE9` at 0x0, header flash mode DIO, `0x4F` = 16 MB @ 80 MHz, and partition-table magic `0xAA50` at 0x8000. These were checked on 2026-10-08 by reading the file headers. Write them at offset 0:
+All three are **merged full images**. Each has bootloader magic `0xE9` at 0x0, header flash mode DIO, `0x4F` = 16 MB @ 80 MHz, and partition-table magic `0xAA50` at 0x8000. These were checked on 2026-10-08 by reading the file headers. Write them at offset 0 (this example assumes the .bin was downloaded into the current folder; otherwise give its full path):
 
 ```powershell
 .\tools\restore-flash.ps1 -File 86switch_onoff.bin

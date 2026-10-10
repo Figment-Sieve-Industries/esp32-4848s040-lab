@@ -2,6 +2,7 @@
 #include "icons.h"
 #include "powerwall.h"
 #include <Arduino.h>
+#include <src/core/lv_global.h> // private: anim list access for pauseScreenAnimations
 #include <math.h>
 #include <string.h>
 #include <time.h>
@@ -140,13 +141,14 @@ void setX(lv_obj_t *o, int32_t x) {
 
 void formatPower(char *buf, size_t n, float w) {
     float a = fabsf(w);
-    if (a < 1000) snprintf(buf, n, "%d W", (int)lroundf(a));
+    long rw = lroundf(a); // round first so 999.6 W becomes "1.00 kW", not "1000 W"
+    if (rw < 1000) snprintf(buf, n, "%ld W", rw);
     else snprintf(buf, n, "%.2f kW", a / 1000.0f);
 }
 
 void formatKWh(char *buf, size_t n, double kwh) {
     if (kwh < 0) kwh = 0;
-    if (kwh < 1000) {
+    if (lround(kwh * 10.0) < 10000) { // rounds to < 1000.0, so "999.96" does not print "1000.0"
         snprintf(buf, n, "%.1f", kwh);
         return;
     }
@@ -177,16 +179,14 @@ void topBarUpdate(TopBar &tb) {
         setText(tb.date, buf);
     }
     NetStatus n = networkStatus();
-    if (n.wifiUp) {
-        snprintf(buf, sizeof(buf), "%s  %d dBm", n.ssid, n.rssi);
-        setText(tb.wifi, buf);
-        setTextColor(tb.wifi, MUTED);
-    } else {
-        setText(tb.wifi, "offline");
-        setTextColor(tb.wifi, C_ALERT);
+    if (n.wifiUp) snprintf(buf, sizeof(buf), "%s  %d dBm", n.ssid, n.rssi);
+    else snprintf(buf, sizeof(buf), "offline");
+    setTextColor(tb.wifi, n.wifiUp ? MUTED : C_ALERT);
+    if (strcmp(lv_label_get_text(tb.wifi), buf) != 0) { // re-align only when the width may have changed
+        lv_label_set_text(tb.wifi, buf);
+        lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -12, 17);
+        lv_obj_align_to(tb.wifiIcon, tb.wifi, LV_ALIGN_OUT_LEFT_MID, -6, -1);
     }
-    lv_obj_align(tb.wifi, LV_ALIGN_TOP_RIGHT, -12, 17);
-    lv_obj_align_to(tb.wifiIcon, tb.wifi, LV_ALIGN_OUT_LEFT_MID, -6, -1);
 }
 
 void pageDots(lv_obj_t *scr, int active) {
@@ -226,6 +226,34 @@ void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint3
     lv_anim_set_path_cb(&an, lv_anim_path_ease_out);
     if (delayMs) cb(var, from); // apply the start value immediately during the delay
     lv_anim_start(&an);
+}
+
+namespace {
+
+// Pause/resume every animation whose var is `obj`. LVGL 9.5 has no public way to enumerate
+// animations (lv_anim_get returns only the first match), so walk the internal list.
+void pauseObjAnims(lv_obj_t *obj, bool pause) {
+    lv_ll_t *ll = &LV_GLOBAL_DEFAULT()->anim_state.anim_ll;
+    for (auto *a = (lv_anim_t *)lv_ll_get_head(ll); a; a = (lv_anim_t *)lv_ll_get_next(ll, a)) {
+        if (a->var != obj) continue;
+        if (pause) {
+            if (!lv_anim_is_paused(a)) lv_anim_pause(a);
+        } else if (lv_anim_is_paused(a)) {
+            lv_anim_resume(a);
+        }
+    }
+    uint32_t n = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < n; i++) pauseObjAnims(lv_obj_get_child(obj, i), pause);
+}
+
+} // namespace
+
+void pauseScreenAnimations(lv_obj_t *screen, bool pause) {
+    if (!screen) return;
+    // Children only: animations on the screen object itself are LVGL's slide transitions, which
+    // must never be frozen (e.g. swiping again while a slide is still running).
+    uint32_t n = lv_obj_get_child_count(screen);
+    for (uint32_t i = 0; i < n; i++) pauseObjAnims(lv_obj_get_child(screen, i), pause);
 }
 
 } // namespace ui

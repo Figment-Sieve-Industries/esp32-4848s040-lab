@@ -211,13 +211,13 @@ void healthRefresh() {
     float soc = d.soc < 0 ? 0 : d.soc > 100 ? 100 : d.soc;
     bool charging = false;
 
-    if (stale) {
+    if (stale || !d.socValid) {
         ui::setText(lblSoc, "--");
         ui::setHidden(lblSocUnit, true);
-        ui::setText(lblStatus, "No data");
+        ui::setText(lblStatus, stale ? "No data" : "Waiting for SOC");
         ui::setTextColor(lblStatus, ui::MUTED);
         ui::setBgColor(statusDot, ui::MUTED);
-        ui::setText(lblEstimate, "");
+        ui::setText(lblEstimate, "--");
         fillWidth = 0;
         ui::setWidth(barFill, 0);
     } else {

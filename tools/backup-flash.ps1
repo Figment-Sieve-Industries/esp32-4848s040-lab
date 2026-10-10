@@ -6,7 +6,7 @@
     .\tools\backup-flash.ps1
     .\tools\backup-flash.ps1 -Port COM5
 .NOTES
-    Takes a few minutes at 921600 baud. Uses PlatformIO's bundled esptool (v5).
+    Takes a few minutes at 921600 baud. Uses PlatformIO's bundled esptool.
 #>
 param([string]$Port)
 

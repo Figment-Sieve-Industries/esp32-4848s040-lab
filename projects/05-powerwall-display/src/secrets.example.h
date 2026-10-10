@@ -14,7 +14,7 @@ static const WifiCred WIFI_NETWORKS[] = {
 };
 
 // Powerwall 3 gateway on the home LAN (give it a DHCP reservation).
-#define PW_HOST "192.0.2.10"
+#define PW_HOST "192.0.2.10" // your gateway's LAN IP
 // Customer password = last 5 characters of the gateway password on the QR sticker.
 #define PW_CUSTOMER_PASSWORD "XXXXX"
 

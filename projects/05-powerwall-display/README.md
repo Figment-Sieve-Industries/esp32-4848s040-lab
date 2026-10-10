@@ -2,7 +2,7 @@
 
 **Goal:** a live Tesla Powerwall 3 power-flow display, read straight from the gateway on the home LAN. No cloud, no server.
 
-**Layout:** design B "house hub" (see the design canvas): house centre, Solar top-left, Grid bottom-left, Powerwall bottom-right, weather + grid-status card top-right. Chevrons run along elbow lines in the direction of flow. Icons are drawn with LVGL lines and arcs (`icons.cpp`). Weather comes from Open-Meteo every 15 min (`WEATHER_LAT`/`WEATHER_LON` in `secrets.h`).
+**Layout:** design M "values in pills" (see the design canvas): house centre, Solar pill top-left, Grid pill bottom-left, Powerwall pill bottom-right (with an SOC bar), and a weather + grid-status + VPP card top-right. Chevron flows run in the direction of power flow. Tag chips show voltage, VA / var, flow direction and charge state. Icons are drawn with LVGL lines and arcs (`icons.cpp`). Weather comes from Open-Meteo every 15 min (`WEATHER_LAT`/`WEATHER_LON` in `secrets.h`).
 
 **What it shows**
 - **Nodes:** Solar, Grid, Home and Powerwall, with live watts.
@@ -10,7 +10,7 @@
 - **Powerwall:** an SOC ring and %, plus "Charging" / "Discharging" / "Idle".
 - **Grid:** "Importing" / "Exporting", and a red **OFF-GRID** banner during an outage.
 - **Top bar:** clock (NTP), date, and the Wi-Fi network with its signal.
-- **Faults:** errors or stale data (>10 s old) show bottom-left, and values change to `--`.
+- **Faults:** errors or stale data (>10 s old) show at the bottom centre, below the page dots, and values change to `--`.
 - **Tap anywhere** to cycle the backlight brightness (255 → 160 → 100).
 - **`SCREEN_ROTATION`** in `main.cpp`: the default `3` is 90° counter-clockwise, so the USB-C port is at the bottom. Touch follows the rotation.
 
@@ -38,10 +38,9 @@
 
 **Memory notes**
 - No `LV_ATTRIBUTE_FAST_MEM` in this project. The core's mbedTLS allocates only from internal RAM, and needs ~40–50 KB per TLS session.
-- The LVGL buffer is 48 lines.
-- Result: about 170 KB internal free at boot and ~125 KB while polling.
+- LVGL uses its own 1 MB PSRAM pool (see Memory below).
 
-**Status:** `works on hw` (2026-10-10). Layout (rotation 3, Powerwall left, Grid bottom) confirmed; flow animation ~28 fps, smooth.
+**Status:** `works on hw` (2026-10-10). Layout (rotation 3; Solar top-left, Grid bottom-left, Powerwall bottom-right) confirmed; flow animation ~28 fps, smooth.
 
 ## Screens (swipe left / right)
 | # | Screen | Shows |
@@ -49,7 +48,7 @@
 | 1 | **Power flow (design M)** | House hub with chevron flows; Solar / Grid / Powerwall as pills (value inside, SOC bar on the Powerwall pill); tag chips for Home voltage (amber outside 207-253 V) and VA / var, Grid direction and kVA / var, Powerwall charge state. Top-right card adds a VPP row (grey ring "VPP idle", pulsing amber "VPP event active" from `grid_services_active`). Weather card: temperature, scrolling condition, high/low, today's rain chance, animated icon. Grid status. Top bar: Wi-Fi network + dBm |
 | 2 | **G · Today** | Self-powered % ring, solar / home / Powerwall in-out kWh, exported / imported tiles, solar-by-hour bars |
 | 3 | **H · Battery & grid** | SOC, charge/discharge power and time to full/empty (13.5 kWh assumed), grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, grid-services (VPP) badge |
-| 4 | **I · Weather** | Current conditions (feels-like, wind, high/low, rain %), next 12 h in 2 h steps, lifetime totals |
+| 4 | **I · Weather** | Current conditions (feels-like, wind, high/low, rain %), next 10 h (now to +10 h) in 2 h steps, lifetime totals |
 
 Code: `screen_house.cpp`, `screen_today.cpp`, `screen_health.cpp`, `screen_weather.cpp`. Shared look and helpers: `ui_common.*`. Icons: `icons.*`.
 
@@ -62,3 +61,11 @@ Code: `screen_house.cpp`, `screen_today.cpp`, `screen_health.cpp`, `screen_weath
 ## Memory
 - LVGL uses its own 1 MB pool in **PSRAM** (`LV_MEM_POOL_ALLOC` in `lv_conf.h`). With the C heap, every small widget lands in internal RAM, and the four screens left only ~38 KB for TLS.
 - Now: ~188 KB internal free at boot and ~140 KB while polling.
+
+## Behaviour notes
+- **Battery %** matches the Tesla app: `(raw - 5) / 0.95`. Disable with `-DPW_SOC_APP_SCALE=0` to show the raw value.
+- **Capacity** (used for time to full/empty) can be set with `-DPW_CAPACITY_KWH=<kWh>`.
+- **Stale weather:** weather data older than 1 h is shown as stale.
+- **Login back-off:** after failed logins the gateway login is retried with increasing delays.
+- **One HTTPS connection** to the gateway is reused across polls.
+- **Weather** is fetched by its own task, using a pinned CA certificate.

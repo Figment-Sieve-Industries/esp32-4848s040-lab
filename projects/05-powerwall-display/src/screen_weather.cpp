@@ -4,6 +4,7 @@
 #include "icons.h"
 #include "powerwall.h"
 #include "secrets.h"
+#include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -17,6 +18,7 @@ constexpr int HOUR_W = (INNER_W - HOUR_GAP * (HOURS - 1)) / HOURS; // 64
 constexpr int LIFE_GAP = 8;
 constexpr int LIFE_W = (INNER_W - LIFE_GAP * 2) / 3;     // 129
 constexpr int COND_W = 220;
+constexpr uint32_t PW_STALE_MS = 10000;
 
 ui::TopBar topBar;
 lv_obj_t *icoBig, *lblTemp, *lblCond, *lblFeels, *lblHiLo;
@@ -97,10 +99,10 @@ lv_obj_t *weatherCreate() {
     lblFeels = ui::label(col, &lv_font_montserrat_14, ui::MUTED, "");
     lblHiLo = ui::label(col, &lv_font_montserrat_14, ui::MUTED, "");
 
-    // Next 12 hours
+    // Next 10 hours (now + 2 h steps)
     lv_obj_t *fc = ui::card(scr, 24, 172, 432, LV_SIZE_CONTENT);
     cardStyle(fc);
-    ui::caption(fc, ui::MUTED, "NEXT 12 HOURS");
+    ui::caption(fc, ui::MUTED, "NEXT 10 HOURS");
     lv_obj_t *hrow = plainBox(fc, INNER_W, LV_SIZE_CONTENT, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(hrow, HOUR_GAP, 0);
     for (int i = 0; i < HOURS; i++) hourSlot(hrow, i);
@@ -124,8 +126,9 @@ void weatherRefresh() {
 
     WeatherData w = weatherData();
     char buf[64];
+    const bool wxOk = w.valid && millis() - w.updatedMs <= WEATHER_STALE_MS;
 
-    if (w.valid) {
+    if (wxOk) {
         snprintf(buf, sizeof(buf), "%d\xC2\xB0", (int)lroundf(w.tempC));
         ui::setText(lblTemp, buf);
         ui::setText(lblCond, weatherText(w.code));
@@ -151,7 +154,7 @@ void weatherRefresh() {
 
     for (int i = 0; i < HOURS; i++) {
         const WeatherHour &h = w.hours[i];
-        bool ok = w.valid && h.hour >= 0 && h.code >= 0;
+        bool ok = wxOk && h.hour >= 0 && h.code >= 0;
         if (i > 0) {
             if (ok) snprintf(buf, sizeof(buf), "%02d:00", h.hour);
             else snprintf(buf, sizeof(buf), "--");
@@ -171,9 +174,10 @@ void weatherRefresh() {
     }
 
     PwData d = powerwallData();
+    const bool pwOk = d.valid && millis() - d.updatedMs <= PW_STALE_MS;
     const double wh[3] = {d.solarExportedWh, d.loadImportedWh, d.siteExportedWh};
     for (int i = 0; i < 3; i++) {
-        if (d.valid) ui::formatKWh(buf, sizeof(buf), wh[i] / 1000.0);
+        if (pwOk) ui::formatKWh(buf, sizeof(buf), wh[i] / 1000.0);
         else snprintf(buf, sizeof(buf), "--");
         ui::setText(lifeVal[i], buf);
     }

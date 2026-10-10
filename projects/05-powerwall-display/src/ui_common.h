@@ -60,4 +60,8 @@ void animFadeIn(lv_obj_t *obj, uint32_t delayMs);            // opa 0 -> 255 ove
 // and bars growing.
 void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint32_t ms, uint32_t delayMs);
 
+// Pause (true) or resume (false) every running animation whose var is `screen` or any of its
+// descendants. Call with pause = true for the screen being left, false for the one shown.
+void pauseScreenAnimations(lv_obj_t *screen, bool pause);
+
 } // namespace ui

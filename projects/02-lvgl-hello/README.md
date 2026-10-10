@@ -8,7 +8,7 @@
 - LVGL **9.5.0** (pinned in `platformio.ini`). Config is a minimal `include/lv_conf.h` (`LV_MEM_SIZE` 48 KB); everything else uses LVGL's defaults.
 - `board4848::lvglBegin(gfx, &touch)` from the shared lib (`Board4848S040_lvgl.h`) does all the LVGL glue:
   - tick
-  - a 48-line (46 KB) partial draw buffer in internal RAM
+  - a 120-line (115 KB) partial draw buffer in internal RAM
   - a flush that copies each area into the PSRAM framebuffer with `draw16bitRGBBitmap` (no RGB565 byte swap needed for an RGB panel)
   - a GT911 input device, with a 100 ms release fallback
 - `main.cpp` only builds the UI.

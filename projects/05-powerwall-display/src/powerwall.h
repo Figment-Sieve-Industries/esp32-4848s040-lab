@@ -1,16 +1,29 @@
 #pragma once
 #include <Arduino.h>
 
-// Powerwall 3 usable capacity, used for time-to-full / time-to-empty estimates
-// (the basic LAN API doesn't report it).
-constexpr float PW_CAPACITY_KWH = 13.5f;
+// Powerwall usable capacity for time-to-full / time-to-empty estimates (the basic LAN API
+// doesn't report it). 13.5 kWh per Powerwall 3; for expansion packs add -DPW_CAPACITY_KWH=27.0f
+// (etc.) to build_flags in platformio.ini.
+#ifndef PW_CAPACITY_KWH
+#define PW_CAPACITY_KWH 13.5f
+#endif
+
+// Battery % as the Tesla app shows it: the app hides a 5% reserve, (raw - 5) / 0.95
+// (same scaling as pypowerwall). Add -DPW_SOC_APP_SCALE=0 to build_flags for the raw value.
+#ifndef PW_SOC_APP_SCALE
+#define PW_SOC_APP_SCALE 1
+#endif
+
+// Weather older than this is treated as stale by the UI ("--" / dimmed).
+constexpr uint32_t WEATHER_STALE_MS = 60UL * 60UL * 1000UL;
 
 // Snapshot of the Powerwall state, written by the network task and read by the UI.
 // Sign conventions (Tesla): site > 0 importing from grid, < 0 exporting;
 // battery > 0 discharging, < 0 charging; solar/load > 0.
 struct PwData {
     float solarW = 0, loadW = 0, siteW = 0, batteryW = 0;
-    float soc = 0;              // battery %, as reported by /api/system_status/soe
+    float soc = 0;              // battery % (app-scaled unless PW_SOC_APP_SCALE is 0)
+    bool socValid = false;      // at least one successful /soe read
     bool gridConnected = true;
     bool gridServicesActive = false;
     float siteVar = 0, siteVA = 0;  // grid reactive (var) / apparent (VA) power
@@ -50,11 +63,14 @@ struct NetStatus {
     int rssi = 0;
 };
 
-// Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS) and the polling task on core 0.
-// The same task fetches Open-Meteo weather every 15 min (one TLS session at a time).
+// Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS), the gateway polling task and the weather task
+// (both on core 0; one TLS session at a time).
 void powerwallStart(uint32_t pollMs = 2000);
 
 // Thread-safe copies of the latest state.
 PwData powerwallData();
 NetStatus networkStatus();
 WeatherData weatherData();
+
+// Diagnostics: minimum free stack (bytes) seen so far in the gateway and weather tasks.
+void netTaskStackFree(uint32_t &gwBytes, uint32_t &wxBytes);

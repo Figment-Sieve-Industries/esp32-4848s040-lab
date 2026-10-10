@@ -43,7 +43,9 @@ static int current = 0;
 void navSwipe(int direction) {
     int next = (current + direction + ui::SCREEN_COUNT) % ui::SCREEN_COUNT;
     if (next == current) return;
+    ui::pauseScreenAnimations(screens[current].obj, true); // hidden screens don't animate
     current = next;
+    ui::pauseScreenAnimations(screens[current].obj, false);
     screens[current].refresh(); // fresh data before it slides in
     lv_screen_load_anim(screens[current].obj, direction > 0 ? LV_SCREEN_LOAD_ANIM_MOVE_LEFT : LV_SCREEN_LOAD_ANIM_MOVE_RIGHT,
                         300, 0, false);
@@ -87,6 +89,7 @@ void setup() {
 
     for (auto &s : screens) s.obj = s.create();
     lv_screen_load(screens[0].obj);
+    for (int i = 1; i < ui::SCREEN_COUNT; i++) ui::pauseScreenAnimations(screens[i].obj, true);
 
     powerwallStart(2000);
     lv_timer_create(refreshCb, 500, nullptr);
@@ -109,10 +112,17 @@ void loop() {
         PwData d = powerwallData();
         NetStatus n = networkStatus();
         TodayStats t = energyToday();
+        uint32_t gwStack, wxStack;
+        netTaskStackFree(gwStack, wxStack);
         Serial.printf("[%s %d dBm] solar %.0f home %.0f grid %.0f batt %.0f soc %.1f%% %s %s | today solar %.2f home %.2f "
-                      "kWh | screen %d | heap %lu | %.1f fps\n",
+                      "kWh | screen %d | %.1f fps\n",
                       n.wifiUp ? n.ssid : "offline", n.rssi, d.solarW, d.loadW, d.siteW, d.batteryW, d.soc,
-                      d.gridConnected ? "on-grid" : "OFF-GRID", d.error, t.solarKWh, t.homeKWh, current,
-                      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), frames / 10.0f);
+                      d.gridConnected ? "on-grid" : "OFF-GRID", d.error, t.solarKWh, t.homeKWh, current, frames / 10.0f);
+        // Long-uptime health: fragmentation shows as a shrinking largest block
+        Serial.printf("  mem: internal free %lu, largest block %lu, min ever %lu | stack free gw %lu wx %lu\n",
+                      (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                      (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)gwStack,
+                      (unsigned long)wxStack);
     }
 }
