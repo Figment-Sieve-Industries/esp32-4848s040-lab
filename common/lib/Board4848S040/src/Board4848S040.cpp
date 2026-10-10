@@ -101,7 +101,7 @@ static const uint8_t st7701_4848s040_init_operations[] = {
     WRITE_COMMAND_8, 0x29, // Display on
     END_WRITE};
 
-Arduino_RGB_Display *initDisplay(uint8_t rotation) {
+Arduino_RGB_Display *initDisplay(uint8_t rotation, size_t bouncePx) {
     // The 480x480x2 framebuffer must fit in PSRAM. Arduino_GFX aborts (ESP_ERROR_CHECK)
     // rather than returning false if allocation fails, so check up front.
     if (!psramFound() || ESP.getFreePsram() < (uint32_t)B4848_LCD_WIDTH * B4848_LCD_HEIGHT * 2) {
@@ -111,7 +111,7 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation) {
     Arduino_DataBus *bus = new Arduino_SWSPI(
         GFX_NOT_DEFINED /* DC */, B4848_LCD_CS, B4848_LCD_SCK, B4848_LCD_SDA, GFX_NOT_DEFINED /* MISO */);
 
-    // Same values as Arduino_GFX's ESP32_4848S040_86BOX_GUITION dev-device config.
+    // Timings as Arduino_GFX's ESP32_4848S040_86BOX_GUITION dev-device config, plus a bounce buffer.
     Arduino_ESP32RGBPanel *panel = new Arduino_ESP32RGBPanel(
         B4848_LCD_DE, B4848_LCD_VSYNC, B4848_LCD_HSYNC, B4848_LCD_PCLK,
         B4848_LCD_R0, B4848_LCD_R1, B4848_LCD_R2, B4848_LCD_R3, B4848_LCD_R4,
@@ -120,7 +120,7 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation) {
         1 /* hsync_polarity */, 10 /* hsync_front_porch */, 8 /* hsync_pulse_width */, 50 /* hsync_back_porch */,
         1 /* vsync_polarity */, 10 /* vsync_front_porch */, 8 /* vsync_pulse_width */, 20 /* vsync_back_porch */,
         0 /* pclk_active_neg */, 12000000 /* prefer_speed (PCLK Hz) */, false /* useBigEndian */,
-        0 /* de_idle_high */, 0 /* pclk_idle_high */, 0 /* bounce_buffer_size_px */);
+        0 /* de_idle_high */, 0 /* pclk_idle_high */, bouncePx /* bounce_buffer_size_px */);
 
     Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
         B4848_LCD_WIDTH, B4848_LCD_HEIGHT, panel, rotation, true /* auto_flush */,

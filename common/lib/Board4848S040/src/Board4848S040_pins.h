@@ -40,6 +40,10 @@
 
 #define B4848_LCD_WIDTH 480
 #define B4848_LCD_HEIGHT 480
+// Bounce buffer (pixels) for the RGB panel: the LCD DMA reads from internal RAM that an ISR refills
+// from the PSRAM framebuffer. Stops flicker when the CPU writes PSRAM while the panel scans out.
+// Must divide 480*480. 0 disables. Costs 2 * px * 2 bytes of internal RAM.
+#define B4848_LCD_BOUNCE_PX (B4848_LCD_WIDTH * 10)
 
 // ---- GT911 capacitive touch (I2C). Not wired to the ESP32: RST (shared RC power-on reset) and INT (floats). ----
 #define B4848_TOUCH_SDA 19

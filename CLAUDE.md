@@ -27,7 +27,7 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - **Arduino vs ESP-IDF** is documented as reasoning (docs/06), not a decision. Don't present it as decided.
 
 ## Library API (`#include <Board4848S040.h>`, namespace `board4848`)
-- `Arduino_RGB_Display *initDisplay(uint8_t rotation = 0)`: ST7701 init over 3-wire SPI, 12 MHz RGB, framebuffer in PSRAM
+- `Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX)`: ST7701 init over 3-wire SPI, 12 MHz RGB, framebuffer in PSRAM, bounce buffers on (they stop the flicker; verified on hardware)
 - `void setBacklight(uint8_t level)`: LEDC at 100 kHz, 8-bit. The driver cuts out below ~100 (`B4848_LCD_BL_MIN`).
 - `Touch`:
   - `begin()` probes GT911 at 0x5D/0x14 and checks the product ID "911"

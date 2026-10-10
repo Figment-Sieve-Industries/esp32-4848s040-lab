@@ -54,9 +54,11 @@ void loop() {
         } else if (p.y >= 40) {
             gfx->fillCircle(p.x, p.y, 6, gfx->color565(p.x / 2, p.y / 2, 255 - p.x / 2));
         }
-        gfx->fillRect(0, 456, 200, 24, RGB565_BLACK);
+        // Text with a background colour overwrites in place (no clear-then-draw flash).
+        gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
         gfx->setCursor(6, 460);
         gfx->printf("x=%3u y=%3u", p.x, p.y);
+        gfx->setTextColor(RGB565_WHITE);
         Serial.printf("touch %u,%u\n", p.x, p.y);
     }
     delay(10);

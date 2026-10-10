@@ -13,4 +13,4 @@
 .\tools\pio.ps1 -Project 01-hello-display-touch -Action all
 ```
 
-**Status:** `builds` (not yet run on hardware)
+**Status:** `works on hw` (2026-10-10): colours correct, touch drawing works, image stable with bounce buffers.

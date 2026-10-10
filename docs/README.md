@@ -10,6 +10,7 @@
 | [06-frameworks-and-libraries.md](06-frameworks-and-libraries.md) | Arduino vs ESP-IDF trade-offs; toolchains and libraries |
 | [07-gotchas.md](07-gotchas.md) | Pitfalls and fixes |
 | [08-power-battery-sleep.md](08-power-battery-sleep.md) | Power tree, Li-ion charger, sleep and wake |
+| [hardware-log.md](hardware-log.md) | What has been verified on real units (chip, flash, PSRAM, display, touch) |
 
 ## Datasheets (`datasheets/`)
 | File | Part |

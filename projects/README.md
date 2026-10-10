@@ -6,7 +6,7 @@ This is the single list of projects; the root README links here. Each project is
 
 | # | Folder | Status | Description |
 |---|---|---|---|
-| 01 | [01-hello-display-touch](01-hello-display-touch/) | builds | Colour test, finger-paint, touch coordinates on screen and serial. Plain Arduino_GFX. |
+| 01 | [01-hello-display-touch](01-hello-display-touch/) | works on hw | Colour test, finger-paint, touch coordinates on screen and serial. Plain Arduino_GFX. |
 | 02 | [02-lvgl-hello](02-lvgl-hello/) | builds | LVGL 9.5 base: button, backlight slider, FPS monitor. **Copy this for UI projects.** |
 
 Status values: `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" means it compiles; it has **not** been run on a board yet.

@@ -13,8 +13,7 @@ This section lays out the trade-offs. No decision has been made; `projects/` cur
 - **Gentle learning curve:** `setup()`/`loop()`, with FreeRTOS available when needed.
 
 ### Arduino weaknesses (on this board specifically)
-- **Fixed sdkconfig.** The precompiled core bakes in options that matter for a PSRAM-framebuffer RGB panel:
-  - `CONFIG_LCD_RGB_RESTART_IN_VSYNC` (auto-recover from drift)
+- **Fixed sdkconfig.** The precompiled core bakes in options that matter for a PSRAM-framebuffer RGB panel. Some are already set in core 3.2.1's `esp32s3/qio_opi` sdkconfig (`CONFIG_LCD_RGB_RESTART_IN_VSYNC=1`, auto-recover from drift). Others you can't change:
   - `CONFIG_LCD_RGB_ISR_IRAM_SAFE`
   - `CONFIG_SPIRAM_FETCH_INSTRUCTIONS` / `CONFIG_SPIRAM_RODATA` (reduce PSRAM-bus contention while flash is busy)
   - PSRAM and cache tuning
@@ -34,7 +33,7 @@ This section lays out the trade-offs. No decision has been made; `projects/` cur
 - Steeper learning curve.
 
 ### Middle-ground options (in order of effort)
-1. **Stay Arduino and use ESP-IDF APIs directly** for the parts that need them. Example: `bounce_buffer_size_px` in `Arduino_ESP32RGBPanel`, the first fix for display drift under Wi-Fi load.
+1. **Stay Arduino and use ESP-IDF APIs directly** for the parts that need them. Example: `bounce_buffer_size_px` in `Arduino_ESP32RGBPanel`. That alone cured the drawing flicker on this board (now the default in `common/`).
 2. **pioarduino `custom_sdkconfig`**: rebuilds the Arduino core libraries with your own sdkconfig lines. You keep the Arduino APIs and get the tuning. The cost is a long first build.
 3. **Hybrid** `framework = arduino, espidf`: a full ESP-IDF project with Arduino as a component.
 4. **Pure ESP-IDF**: see `reference/ESP32-4848S040-First-Start`.
@@ -86,7 +85,7 @@ This section lays out the trade-offs. No decision has been made; `projects/` cur
 ## 3. ESP-IDF (native)
 - Components: `espressif/esp_lcd_st7701` (3-wire SPI + RGB), `espressif/esp_lcd_touch_gt911`, `espressif/esp_lvgl_port`.
 - Use `esp_lcd_new_panel_io_3wire_spi()` for init, then `esp_lcd_new_rgb_panel()` with the timings from [04-display-st7701.md](04-display-st7701.md).
-- Enable `CONFIG_SPIRAM_MODE_OCT` and `CONFIG_SPIRAM_SPEED_80M`. Consider `CONFIG_LCD_RGB_RESTART_IN_VSYNC` to avoid drift.
+- Enable `CONFIG_SPIRAM_MODE_OCT` and `CONFIG_SPIRAM_SPEED_80M`. Enable `CONFIG_LCD_RGB_RESTART_IN_VSYNC` to avoid drift (the Arduino core already has it).
 
 ## 4. ESPHome / Home Assistant (wall panel)
 A ready config is on the ESPHome devices site: https://devices.esphome.io/devices/guition-esp32-s3-4848s040

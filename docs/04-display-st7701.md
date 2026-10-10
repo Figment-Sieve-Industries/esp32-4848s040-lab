@@ -52,8 +52,11 @@ Hardware rotation isn't available on an RGB panel. Rotation happens in software:
 ## Performance tips
 - The framebuffer is 480×480×2 = 460 KB, in PSRAM.
 - With LVGL, `board4848::lvglBegin()` uses a 48-line partial buffer in internal RAM. Direct mode (rendering into the PSRAM framebuffer) needs `auto_flush=false` or `gfx->flush(true)` for cache writeback.
-- If the image glitches when Wi-Fi is active, that's PSRAM bandwidth contention:
-  1. Try bounce buffers (`bounce_buffer_size_px` in `Arduino_ESP32RGBPanel`, e.g. 480×10).
+- **Bounce buffers are on by default** (`B4848_LCD_BOUNCE_PX` = 480×10 px, about 19 KB of internal RAM for two buffers).
+  - **Verified on hardware (2026-10-10):** without them, the whole screen flickered while drawing with a finger. The CPU writing the PSRAM framebuffer starved the LCD DMA. With them, the image is stable.
+  - Pass `initDisplay(rotation, 0)` to disable them, or a larger value to go further. The value must divide 480×480.
+- If the image still glitches (e.g. under heavy Wi-Fi load), that's more PSRAM bandwidth contention:
+  1. Raise the bounce buffer (e.g. 480×20).
   2. Lower PCLK.
   3. Try the zero front/back porch variant.
   4. See the sdkconfig options in [06](06-frameworks-and-libraries.md).

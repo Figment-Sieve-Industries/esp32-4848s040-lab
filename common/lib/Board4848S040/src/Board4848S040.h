@@ -10,7 +10,7 @@ namespace board4848 {
 // Create the display object and run the ST7701 init.
 // Returns nullptr if PSRAM is missing or too small for the framebuffer.
 // (Other panel failures inside Arduino_GFX abort via ESP_ERROR_CHECK.)
-Arduino_RGB_Display *initDisplay(uint8_t rotation = 0);
+Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX);
 
 // Backlight brightness 0..255 (0 = off). 100 kHz LEDC PWM.
 // Below ~B4848_LCD_BL_MIN the driver cuts out, so 1..MIN is effectively off.

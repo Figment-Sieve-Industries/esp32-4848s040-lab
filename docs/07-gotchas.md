@@ -8,6 +8,7 @@
 | Boot loop or `PSRAM init failed` | PSRAM is **octal**: use `memory_type = qio_opi` (PIO) or "OPI PSRAM" (Arduino IDE). `initDisplay()` returns nullptr if PSRAM is missing. |
 | Black screen, backlight on | The init sequence wasn't accepted (wrong table or SPI pins), or the RGB timing is off. See [04](04-display-st7701.md). |
 | Black screen, backlight off | GPIO38 isn't driven. Call `board4848::setBacklight(255)`. |
+| Screen flickers while drawing (e.g. finger-paint) | PSRAM bandwidth: CPU framebuffer writes starve the LCD DMA. **Fixed** by the bounce buffers `initDisplay()` now enables by default; verified on hardware. |
 | Image shifted, rolling or shimmering | RGB porch/PCLK timing; try the variants table in [04](04-display-st7701.md). Wi-Fi + PSRAM contention: bounce buffers or a lower PCLK. |
 | Colours swapped or wrong | RGB vs BGR order, or the wrong data-pin order. Use the pin map in `Board4848S040_pins.h` exactly. |
 | Touch not detected | `begin()` probes 0x5D and 0x14 and checks the "911" ID. Check SDA 19 / SCL 45. INT/RST aren't wired, so the address can't be forced. |
