@@ -18,6 +18,7 @@ What has been verified on real units. Add an entry each time something is tested
 | LVGL (02-lvgl-hello) | LVGL 9.5 via `lvglBegin()`: renders correctly, button taps count once each, slider drags smoothly, no flicker |
 | Restart quirk | Restarting via `ESP.restart()` from the 03 launcher once came back as `RTCWDT_RTC_RST` (RTC watchdog) instead of a software reset. It recovered by itself. Suspected: restarting while the RGB panel DMA is running. Not fixed yet |
 | Wi-Fi + HTTPS | Joins `<home-ssid>` (2.4 GHz, ch 13, ≈ −60 dBm). HTTPS to the Powerwall gateway works with TLS and the LVGL UI running (~125 KB internal heap free while polling) |
+| 05 Powerwall display | 4 LVGL screens + Wi-Fi + 2 TLS endpoints: ~188 KB internal free at boot, ~140 KB polling, 20-50 fps. Powerwall 3 fw 26.26.4 basic LAN API: only meters/aggregates, soe and grid_status answer (all else 404); aggregates include voltage, frequency, reactive/apparent power and lifetime Wh counters |
 | Not yet tested | Corner accuracy, rotation, backlight cut-out below 100, SD card, audio, relays, Wi-Fi, battery |
 
 ### LVGL benchmark, unit 1 (2026-10-10)

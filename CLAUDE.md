@@ -40,3 +40,13 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 ## Toolchain
 - PlatformIO Core 6.1.x with pioarduino `54.03.21-2` (Arduino core 3.2.1, IDF 5.4). Newer pioarduino releases need PIO Core ≥ 6.2.
 - Arduino_GFX is pinned in `library.json`. LVGL is pinned to 9.5.0 per project.
+
+## Project 05 (Powerwall display) - current state
+- Main screen = design **M** ("values in pills") from the design canvas https://<private design canvas>. Boards A-M there are the option history. Change the canvas first for layout work, then build the chosen board.
+- Architecture: `powerwall.cpp` is the network task on core 0 (Powerwall LAN API with a Bearer token + Open-Meteo every 15 min, one TLS session at a time). LVGL runs on core 1 only. Screens are `screen_*.cpp` behind `screens.h`, sharing `ui_common.*` (palette, top bar, page dots, animations). `energy.cpp` keeps today's totals in RTC memory.
+- **The user does not want internal-flash writes at runtime** (wear). Use RTC memory now; an SD card later.
+- Memory: LVGL heap = 1 MB PSRAM pool (`LV_MEM_POOL_ALLOC`). No `LV_ATTRIBUTE_FAST_MEM` (mbedTLS needs ~50 KB internal RAM). Keep ~100 KB+ internal free.
+- Fonts: built-in Montserrat only has ASCII + the degree sign; there is no middle dot, so use "/".
+- Editing tip: Python heredocs in Git Bash turned `
+` inside C strings into real newlines more than once. For C/C++ string edits use the Edit tool.
+- Sub-agents: the user wants parallel sub-agents where possible, with model/effort matched to the task (e.g. Sonnet medium for well-specified screen files). Write the shared headers/contracts first; agents build with a separate `PLATFORMIO_BUILD_DIR` to avoid collisions.

@@ -34,6 +34,9 @@ mini-screen/
     └── README.md
 ```
 
+## Design canvas
+UI layout options and mockups for the Powerwall display (boards A-M): https://<private design canvas>
+
 ## Getting started
 
 Use **PowerShell** or VS Code's PlatformIO buttons. **Not Git Bash**: ESP's tool installer rejects MSYS shells and the first build fails (see [docs/07](docs/07-gotchas.md)).
