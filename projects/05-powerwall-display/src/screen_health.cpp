@@ -16,7 +16,7 @@ constexpr int SHEEN_W = 60;
 constexpr int CARD_W = 210;
 constexpr int INNER_W = CARD_W - 28; // card padding 14 each side
 
-constexpr float V_MIN = 216.0f, V_MAX = 253.0f;
+constexpr float V_MIN = ui::MAINS_V_MIN, V_MAX = ui::MAINS_V_MAX;
 constexpr float F_MIN = 49.5f, F_MAX = 50.5f;
 
 const lv_color_t BAND = lv_color_hex(0x1F3A2B);
@@ -175,7 +175,7 @@ lv_obj_t *healthCreate() {
     lv_anim_start(&a);
 
     // Cards
-    cards[0] = gaugeCard(scr, 24, 166, gVolt, "GRID VOLTAGE", "V", "216", "253");
+    cards[0] = gaugeCard(scr, 24, 166, gVolt, "GRID VOLTAGE", "V", "207", "253");
     cards[1] = gaugeCard(scr, 246, 166, gFreq, "FREQUENCY", "Hz", "49.5", "50.5");
 
     cards[2] = ui::card(scr, 24, 318, CARD_W, 108);

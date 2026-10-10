@@ -341,11 +341,11 @@ void houseRefresh() {
         setText(valSolar, buf);
         formatPower(buf, sizeof(buf), d.loadW);
         setText(valHome, buf);
-        // Mains voltage; amber outside the UK statutory range 216-253 V
+        // Mains voltage; amber outside the normal range (MAINS_V_MIN..MAINS_V_MAX)
         if (d.voltageV > 50) {
             snprintf(buf, sizeof(buf), "%.1f V", d.voltageV);
             setText(valVolt, buf);
-            setTextColor(valVolt, d.voltageV < 216 || d.voltageV > 253 ? C_SOLAR : MUTED);
+            setTextColor(valVolt, d.voltageV < MAINS_V_MIN || d.voltageV > MAINS_V_MAX ? C_SOLAR : MUTED);
         } else {
             setText(valVolt, "");
         }

@@ -9,6 +9,9 @@ namespace ui {
 extern const lv_color_t BG, CARD, CARD_HI, TRACK, TEXT, MUTED;
 extern const lv_color_t C_SOLAR, C_GRID, C_HOME, C_BATT, C_ALERT, C_ALERT_BG, C_WEATHER, C_OK_BG;
 
+// Mains voltage normal range (230 V nominal, 207-253 V)
+constexpr float MAINS_V_MIN = 207.0f, MAINS_V_MAX = 253.0f;
+
 constexpr int SCREEN_COUNT = 4; // 0 = house (B), 1 = today (G), 2 = battery & grid (H), 3 = weather (I)
 
 // Fonts available (built-in Montserrat): 12 14 16 18 20 22 26 28 30 40 48.
