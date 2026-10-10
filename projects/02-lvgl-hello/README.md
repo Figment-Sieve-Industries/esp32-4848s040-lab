@@ -23,4 +23,4 @@
 .\tools\pio.ps1 -Project 02-lvgl-hello -Action all
 ```
 
-**Status:** `builds` (not yet run on hardware)
+**Status:** `works on hw` (2026-10-10): UI renders, touch and button work, backlight slider dims smoothly down to 100 with no whine.

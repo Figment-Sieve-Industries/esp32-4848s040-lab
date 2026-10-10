@@ -22,7 +22,7 @@ The same pins are defined in code in [`common/lib/Board4848S040/src/Board4848S04
 | Backlight | 38, active high → U5 EN via R13 (R14 pull-down). PWM at 100 kHz. |
 | LCD reset | Not connected to the ESP32. Shared RC power-on reset (R16 10k / C22 1 µF) with the GT911. |
 
-Backlight minimum: the driver cuts out below roughly **100/255** at 100 kHz PWM *(community: joevial's `BL_EN_MIN 102`; unverified here)*. An earlier figure of ~60 was measured at a lower PWM frequency.
+Backlight minimum: the driver cuts out below roughly **100/255** at 100 kHz PWM *(community: joevial's `BL_EN_MIN 102`)*. On unit 1, **100 is confirmed still lit** and there is no whine at 100 kHz; the exact cut-out isn't measured yet ([hardware log](hardware-log.md)). An earlier figure of ~60 was measured at a lower PWM frequency.
 
 ## Touch: GT911
 | Function | GPIO |

@@ -14,5 +14,6 @@ What has been verified on real units. Add an entry each time something is tested
 | Display | ST7701 init + RGB timings OK. Red/green/blue/white colour test correct |
 | Flicker | Whole-screen flicker while drawing **without** bounce buffers. **Stable with** `B4848_LCD_BOUNCE_PX` = 480×10 |
 | Touch | GT911 at **0x5D**, product ID "911". Finger drawing tracks correctly |
-| Backlight | On at 255 (100 kHz LEDC). Minimum level and whine not yet checked |
-| Not yet tested | Corner accuracy, rotation, backlight minimum, SD card, audio, relays, Wi-Fi, battery |
+| Backlight | 100 kHz LEDC: smooth dimming 255 → 100, **still lit at 100** (`B4848_LCD_BL_MIN`), **no audible whine**. The true cut-out point below 100 isn't measured yet |
+| LVGL (02-lvgl-hello) | LVGL 9.5 via `lvglBegin()`: renders correctly, button taps count once each, slider drags smoothly, no flicker |
+| Not yet tested | Corner accuracy, rotation, backlight cut-out below 100, SD card, audio, relays, Wi-Fi, battery |
