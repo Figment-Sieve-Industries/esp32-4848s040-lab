@@ -158,7 +158,7 @@ Optional, and recommended. The card is mounted after the display starts, checked
 | Daily history | `/powerwall/days/YYYY-MM.bin` | One file per month for the history screen. Raw, no header: 31 fixed slots (day of month minus 1) of 448 bytes each (13,888 bytes), each slot holding the day's totals (solar, home, export, import, battery in and out) and 24 hourly bins, with its own CRC, so a damaged slot loses only that day. Today's record is kept in RTC memory and saved every 10 minutes, on the hour and at midnight. A file is replaced by writing `.tmp` whole, then remove and rename; if power is cut between the two, the complete `.tmp` is used |
 | Today's totals backup | On the card, written atomically | Today's totals survive a power cut and a reboot; the baseline is restored at start-up |
 | Data cache | `/powerwall/cache/<name>.bin` | Weather, aurora, Kp, moon times, space weather, sun image, El Nino. After a reboot the screens fill at once and a fetch still inside its refresh window is skipped. Each record has a CRC; a bad or old-format record is ignored and refetched |
-| Settings | On the card | Brightness |
+| Settings | `settings.bin` on the card | Brightness (percent) and the screen on/off mask, format SET3; older SET1 / SET2 files still load (every screen on) |
 
 CSV columns (header row `time,solar_w,home_w,grid_w,battery_w,soc_pct,voltage_v,grid_up`):
 
@@ -177,12 +177,12 @@ Without a card, "today" totals come from the gateway's lifetime counters minus a
 
 ## Serial commands
 
-Type a line into the serial monitor (115200 baud) to drive the display without touching it. Each command gets one reply line ending in `#ok` or `#err <reason>`. Commands are read without blocking, so the display keeps running.
+Type a line into the serial monitor (115200 baud) to drive the display without touching it. Each command gets one reply line ending in `#ok` or `#err <reason>`. Commands are read without blocking, so the display keeps running. The source of truth is the comment block at the top of `src/main.cpp`.
 
 | Command | Does |
 |---|---|
-| `s <n>` | Go to screen `n` (0 to 10) the way a swipe does |
-| `n` / `p` | Next / previous screen (wraps) |
+| `s <n>` | Go to screen `n` (0 to 10) the way a swipe does; `#err screen disabled` if that screen is switched off in Settings |
+| `n` / `p` | Next / previous enabled screen (wraps) |
 | `l` | List the screens, the current one marked `*` |
 | `b <0-255>` | Set the backlight now over the current duty range (not saved; the panel driver cuts out below about 100/255) |
 | `bf <hz>` | Backlight PWM frequency, 100 to 1000000 Hz (not saved). Keeps the brightness and uses the highest duty resolution that frequency allows (8 bits at 100 kHz, 10 bits at 20 to 25 kHz). Replies with the same line as `br` |
@@ -196,6 +196,7 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 | `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |
 | `v <0\|1>` | Privacy mode for screenshots: placeholder Wi-Fi name and town (not saved) |
 | `c` | List the SD cache records (name, size, version, age) |
+| `k` | Diagnostic: force an RGB scan-out restart at the next VSYNC (panel drift, see guide 03 `inv-panel-drift`) |
 | `r` | Reboot (RTC data and the clock survive) |
 | `h` | Help |
 

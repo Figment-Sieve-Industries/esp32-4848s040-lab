@@ -10,6 +10,13 @@
 | [06-frameworks-and-libraries.md](06-frameworks-and-libraries.md) | Arduino vs ESP-IDF trade-offs; toolchains and libraries |
 | [07-gotchas.md](07-gotchas.md) | Pitfalls and fixes |
 | [08-power-battery-sleep.md](08-power-battery-sleep.md) | Power tree, Li-ion charger, sleep and wake |
+| [09-alternative-displays.md](09-alternative-displays.md) | Boards similar to the 4848S040, with UK buying options |
+| [10-esp32-p4-displays.md](10-esp32-p4-displays.md) | ESP32-P4 display boards (UK buying options) |
+| [11-space-weather-and-climate-data.md](11-space-weather-and-climate-data.md) | Space weather and ENSO data sources (research) |
+| [12-esp32-performance-and-framework.md](12-esp32-performance-and-framework.md) | ESP32-S3 performance, memory and framework choice |
+| [getting-started-powerwall.md](getting-started-powerwall.md) | Step-by-step guide to the Powerwall 3 display (project 05) |
+| [guide/](guide/README.md) | The development guide: quirks, debugging playbook, investigations, ADRs |
+| [flash/](flash/README.md) | The browser flasher page (GitHub Pages) |
 | [hardware-log.md](hardware-log.md) | What has been verified on real units (chip, flash, PSRAM, display, touch) |
 
 ## Datasheets (`datasheets/`)

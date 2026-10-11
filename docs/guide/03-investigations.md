@@ -38,7 +38,7 @@ Hardware: one Guition ESP32-4848S040C_I ("unit 1"; ESP32-S3 N16R8, 4" 480x480 ST
 | [inv-sd-card-clock](#inv-sd-card-clock) | Choosing the SD clock per card | Storage | fixed | 2 GB card: rated 25 MHz, flaky at 4 MHz, failing at 10 MHz+ | 2026-10-11 |
 | [inv-heredoc-newlines](#inv-heredoc-newlines) | Shell heredocs corrupt C string escapes | Tooling | mitigated | 6 incidents over 2 days | 2026-10-10 / 11 |
 | [inv-lint-setup](#inv-lint-setup) | Making static analysis actually analyse | Tooling | fixed | 357 -> 3 raw findings on 05 | 2026-10-11 |
-| [inv-brightness-range](#inv-brightness-range) | Brightness slider makes little difference | Display | diagnosed | duty 100-255 at 100 kHz | 2026-10-11 |
+| [inv-brightness-range](#inv-brightness-range) | Brightness slider makes little difference | Display | mitigated | duty 100-255 at 100 kHz; slider now gamma, sweep tooling in | 2026-10-11 |
 | [inv-internal-ram](#inv-internal-ram) | Internal RAM low point below 100 KB | Memory | fixed | min ever 92,136 B -> 146,116 B -> 118,096 B | 2026-10-11 |
 | [inv-loop-stack-overflow](#inv-loop-stack-overflow) | Core 1 panic: LVGL task stack nearly full | Memory | fixed | stack free 824 B -> 9,624 B | 2026-10-11 |
 | [inv-boot-race-lock](#inv-boot-race-lock) | SD task used a mutex before it existed | Concurrency | fixed | assert in `xQueueSemaphoreTake` -> none | 2026-10-11 |
@@ -47,7 +47,7 @@ Hardware: one Guition ESP32-4848S040C_I ("unit 1"; ESP32-S3 N16R8, 4" 480x480 ST
 | [inv-redraw-load](#inv-redraw-load) | Constant redraw load from animations | UI / performance | mitigated | not isolated | 2026-10-11 |
 | [inv-job-budget](#inv-job-budget) | Long background jobs made live data stale | Network | fixed | jobs up to 25 s+ -> 12 s budget | 2026-10-11 |
 | [inv-shared-modules](#inv-shared-modules) | Consolidation round: duplicated HTTP code | Code quality | done | flash 2,263,562 -> 2,250,190 B; 217 host tests | 2026-10-11 |
-| [inv-tls-gateway-refusals](#inv-tls-gateway-refusals) | Gateway refuses TLS handshakes | Network | open (keep-alive under trial) | 27.9 -> 2.2 TLS connects/min; 19 -> 1 refusals | 2026-10-11 |
+| [inv-tls-gateway-refusals](#inv-tls-gateway-refusals) | Gateway refuses TLS handshakes | Network | mitigated (keep-alive default since `c9a6630`; long soak pending) | 27.9 -> 2.2 TLS connects/min; 19 -> 1 refusals | 2026-10-11 |
 | [inv-barchart-empty](#inv-barchart-empty) | Aurora and sun bar strips empty | UI | fixed | empty -> drawn (seen in screenshots) | 2026-10-11 |
 | [inv-tooling-pitfalls](#inv-tooling-pitfalls) | Measurements spoiled by tooling | Method | documented | 2 measurements invalidated | 2026-10-11 |
 | [inv-panel-drift](#inv-panel-drift) | Panel image shifted sideways once | Display | open | 60 forced SD saves: no shift | 2026-10-11 |
@@ -79,7 +79,7 @@ Project 05 (Powerwall display) unless the stage names another project. "Boot" is
 | crackle fixes: 4 KB threshold, 480x20 bounce (`300e7b5`) | 2026-10-11 | 144,916 B | 130,576-142,336 B (median 136,440) | 118,052 B | 59,380-75,764 B | 39.4-58.2 (median 47.6) | n/r | `soak15.log` (14.9 min) |
 | rotated flush (`bd3f28d`) | 2026-10-11 | 144,916 B | 129,552-143,484 B (median 136,468) | 117,576 B | 61,428-75,764 B | 40.2-50.0 (median 41.6) | n/r | `soak-flush2.log` (9.9 min) |
 | consolidation refactor (`496462e`) | 2026-10-11 | 142,512 B | 127,276-140,432 B (median 135,108) | 115,104 B | 59,380-71,668 B | 35.6-49.3 (median 37.8) | ~2.25 MB (2,250,190 B on the network branch) | `soak-refactor.log` (9.9 min); `ba7b097` |
-| refactor + `-DPW_GW_KEEPALIVE=1` (trial build, not committed) | 2026-10-11 | 142,256 B | 122,536-140,296 B (median 136,444) | 105,400 B | 55,284-60,404 B | 43.5-57.0 (median 55.0) | n/r | `soak-keepalive.log` (9.9 min) |
+| refactor + `-DPW_GW_KEEPALIVE=1` (trial build; keep-alive became the default in `c9a6630`) | 2026-10-11 | 142,256 B | 122,536-140,296 B (median 136,444) | 105,400 B | 55,284-60,404 B | 43.5-57.0 (median 55.0) | n/r | `soak-keepalive.log` (9.9 min) |
 
 Reading the table:
 - The FPS column is the heartbeat's frame count on the main screen. It depends on how many chevrons are moving, which follows live power flows, so rows are not directly comparable (inferred).
@@ -365,7 +365,7 @@ Reading the table:
 | Polling internal free | 37,764 B | 140,060 B |
 | Main-screen FPS | 48.8 | 46.1 |
 
-Later screens' per-screen cost was measured at 0 B internal ([inv-internal-ram](#inv-internal-ram)). The pool sat at 13-17% used with 8-10 screens (heartbeat `lvgl pool` line).
+Later screens' per-screen cost was measured at 0 B internal ([inv-internal-ram](#inv-internal-ram)). The pool sat at 13-17% used with 8-10 screens (11 now) (heartbeat `lvgl pool` line).
 
 **Sources.** Transcript 2026-10-10; [07-gotchas](../07-gotchas.md); `projects/05-powerwall-display/include/lv_conf.h`.
 
@@ -404,7 +404,7 @@ The decoded backtrace ends in `HTTPClient::getString()` -> `writeToStream()` -> 
 1. Fetch the chunked `/aggregates` last, as HTTP/1.0 (`useHTTP10(true)`), so the body is plain and the connection closes. The small fixed-length endpoints stay on the kept-alive connection.
 2. Network tasks at `tskIDLE_PRIORITY`, so any library busy-wait time-slices with IDLE0.
 3. Connect 3 s / read 3 s / handshake 8 s timeouts (the default handshake timeout was 120 s).
-4. 2026-10-11 refactor: `net_body.h`, an own de-chunker and read loop with a deadline and yields, host-tested by splitting real payloads at every byte offset (217 checks). Gateway keep-alive for `/aggregates` is behind `-DPW_GW_KEEPALIVE` (default 0). See [inv-tls-gateway-refusals](#inv-tls-gateway-refusals).
+4. 2026-10-11 refactor: `net_body.h`, an own de-chunker and read loop with a deadline and yields, host-tested by splitting real payloads at every byte offset (217 checks). Gateway keep-alive for `/aggregates` is behind `PW_GW_KEEPALIVE` (introduced with default 0; **now default 1** since `c9a6630`). See [inv-tls-gateway-refusals](#inv-tls-gateway-refusals).
 
 **Before / after.**
 
@@ -571,7 +571,7 @@ The 2 GB card before the fix: 1 MB write failed in all 3 runs. The 256 KB patter
 | | |
 |---|---|
 | Date | 2026-10-11 |
-| Status | diagnosed; A and B implemented (builds), hardware sweep pending |
+| Status | mitigated; A and B implemented and running on unit 1 (owner-checked 2026-10-11), full frequency sweep pending |
 | Commit | `14a049f` (docs: backlight range options A/B) |
 
 **Symptom.** "the brightness slider almost makes no difference" (user).
@@ -585,7 +585,7 @@ The 2 GB card before the fix: 1 MB write failed in all 3 runs. The 256 KB patter
 - B. A perceptual (gamma) curve on the slider.
 - The hardware mod only if A falls short.
 
-**Implemented (builds; not flashed, nothing measured yet).**
+**Implemented (on unit 1; owner-checked 2026-10-11: "the tiniest bit of whine but that's fine", frequency and duty at the time not recorded; full frequency sweep not done). A LEDC attach bug found on first flash is fixed ([Q-FW-06](01-quirks-and-gotchas.md#q-fw-06)).**
 - Board library: `B4848_LCD_BL_FREQ_HZ` (default stays 100 kHz), `setBacklightFrequency()` retunes at run time and picks the highest duty resolution (8 bits at 100 kHz, 10 bits at 20-25 kHz), plus `setBacklightDuty/Level()` and getters. `backlightMinDuty()` scales `B4848_LCD_BL_MIN` as a fraction of the period.
 - Project 05: slider 0-100 % through `duty = min + (max - min) * (pct/100)^2.2` (`backlight_curve.h`, host-tested); 0 % is min-but-on. Settings store the percentage (`SET2`); old raw-duty files (`SET1`) are converted on load.
 - Serial `bf <hz>`, `bd <duty>`, `br`, `bs [steps ms from to]` for the sweep; procedure in [02-pinout](../02-pinout.md).
@@ -916,8 +916,8 @@ Reading: the throttle does what it should (the Wi-Fi label is rarely in a slow f
 |---|---|
 | Date | 2026-10-11 |
 | Area | Network |
-| Status | open: the keep-alive trial looks better; not yet the default |
-| Commits | `ba7b097` (`PW_GW_KEEPALIVE`, default 0; TLS connect counter); `496462e` (net stats in heartbeat) |
+| Status | mitigated: keep-alive is the default since `c9a6630` (10-minute soak only; a long soak is pending) |
+| Commits | `ba7b097` (`PW_GW_KEEPALIVE`, introduced with default 0, flipped to 1 in `c9a6630`; TLS connect counter); `496462e` (net stats in heartbeat) |
 
 **Symptom.** The soaks log failed handshakes: `(-30592) SSL - A fatal alert message was received from our peer` and occasionally `(-28160) SSL - The handshake negotiation failed`. The background-fetch failure counter stayed at 0, so these were gateway polls (transcript 2026-10-11).
 
@@ -966,7 +966,7 @@ The transcript's own count, made with a narrower pattern (`fatal alert` only; re
 | Status | fixed |
 | Fix | `496462e` (BarChart newest-bars used lv_obj_get_height before the first layout (aurora/sun strips were empty)) |
 
-**How it was found.** The first full set of serial screenshots: `x` command plus `tools-dev/screendump.py --all` (10 screens, 480x480, 0 missing rows, CRC ok). The aurora activity strip and the sun wind strip were blank.
+**How it was found.** The first full set of serial screenshots: `x` command plus `tools-dev/screendump.py --all` (10 screens at the time, 480x480, 0 missing rows, CRC ok). The aurora activity strip and the sun wind strip were blank.
 
 **Cause.** `barChartSetNewest()` computed bar tops from `lv_obj_get_height(chart)`. That is 0 until LVGL's first layout pass, so every bar got a zero or negative height and was hidden.
 

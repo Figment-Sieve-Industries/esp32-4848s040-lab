@@ -2,6 +2,9 @@
 # Projects that need credentials build with their secrets.example.h copied to secrets.h (placeholders).
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:

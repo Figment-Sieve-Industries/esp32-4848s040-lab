@@ -46,7 +46,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-GFX-02](#q-gfx-02) | Constant crackle under combined PSRAM load | W | Same |
 | [Q-GFX-03](#q-gfx-03) | Rotated flush about 2x slow in Arduino_GFX | F (rotation 3) | Arduino_GFX RGB display + LVGL partial rendering |
 | [Q-GFX-04](#q-gfx-04) | Backlight PWM frequency silently ignored | F | Any Arduino-ESP32 3.x |
-| [Q-GFX-05](#q-gfx-05) | Backlight cut-out and a nearly invisible slider range | O | This board |
+| [Q-GFX-05](#q-gfx-05) | Backlight cut-out and a nearly invisible slider range | W | This board |
 | [Q-GFX-06](#q-gfx-06) | `initDisplay()` aborts instead of failing when PSRAM is short | F | Arduino_GFX RGB panels |
 | [Q-GFX-07](#q-gfx-07) | RGB timing variants, drift reports and a PCLK typo | D | ST7701 RGB panels |
 | [Q-GFX-08](#q-gfx-08) | PSRAM is unreachable during flash writes (not seen here) | D | Any ESP32-S3 RGB panel |
@@ -112,7 +112,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-NET-01](#q-net-01) | HTTPClient's chunked reader stalls on a kept-alive TLS socket | W | Arduino-ESP32 3.2.1 HTTPClient |
 | [Q-NET-02](#q-net-02) | Chunked JSON parses as a number | W | Arduino-ESP32 HTTPClient + ArduinoJson |
 | [Q-NET-03](#q-net-03) | Default TLS handshake timeout is 120 s | F | Arduino-ESP32 WiFiClientSecure |
-| [Q-NET-04](#q-net-04) | The gateway refuses some handshakes at about 30 per minute | O | Powerwall 3 gateway |
+| [Q-NET-04](#q-net-04) | The gateway refuses some handshakes at about 30 per minute | W | Powerwall 3 gateway |
 | [Q-NET-05](#q-net-05) | One TLS session at a time; job time budget vs stale data | F | Any RAM-tight ESP32 |
 | [Q-NET-06](#q-net-06) | TLS needs a valid clock first | F | Any ESP32 with certificate checks |
 | [Q-NET-07](#q-net-07) | Which root CA to pin for which host | D | The hosts listed |
@@ -295,9 +295,9 @@ Status key: F fixed, W worked-around, O open, D documented.
 ### Q-GFX-05 Backlight cut-out and a nearly invisible slider range
 - **Symptom:** The driver turns off below about 100/255 at 100 kHz. In project 05 the brightness slider (duty 100-255) barely changes anything (user report, 2026-10-11).
 - **Root cause (inferred):** The range is only 2.5x in duty, and perceived brightness is roughly logarithmic. The boost driver (U5, dimmed by gating its EN pin) also needs start-up time on each pulse. At 100 kHz a period is 10 us, so low and mid duties are compressed. That would explain a cut-out near 100 at 100 kHz but about 60 at a lower frequency.
-- **Fix:** Code is in (builds, not yet tried on hardware): configurable PWM frequency and resolution in the board library, a gamma slider in 05, serial `bf`/`bd`/`br`/`bs` for the sweep ([docs/02](../02-pinout.md) "Backlight dimming range" has the procedure). Still to do on the board: sweep 100/50/25/20/5 kHz with someone watching and listening, pick the lowest silent frequency, re-measure the minimum, then change `B4848_LCD_BL_FREQ_HZ` and `B4848_LCD_BL_MIN`. A hardware mod (R12, FB wire) is the fallback.
-- **Evidence:** Unit 1 is still lit at 100; the true cut-out is not measured ([hardware-log](../hardware-log.md)). Investigation: [inv-backlight-pwm](03-investigations.md#inv-backlight-pwm).
-- **Status:** open (tooling and gamma slider implemented, hardware sweep pending). **Applies to:** this board.
+- **Fix:** Code is in and running on unit 1 (owner-checked 2026-10-11, "tiniest bit of whine but that's fine"; the LEDC attach bug found on first flash is [Q-FW-06](#q-fw-06)): configurable PWM frequency and resolution in the board library, a gamma slider in 05, serial `bf`/`bd`/`br`/`bs` for the sweep ([docs/02](../02-pinout.md) "Backlight dimming range" has the procedure). Still to do on the board: sweep 100/50/25/20/5 kHz with someone watching and listening, pick the lowest silent frequency, re-measure the minimum, then change `B4848_LCD_BL_FREQ_HZ` and `B4848_LCD_BL_MIN`. A hardware mod (R12, FB wire) is the fallback.
+- **Evidence:** Unit 1 is still lit at 100; the true cut-out is not measured ([hardware-log](../hardware-log.md)). Investigations: [inv-brightness-range](03-investigations.md#inv-brightness-range), [inv-backlight-pwm](03-investigations.md#inv-backlight-pwm).
+- **Status:** worked-around (tooling and gamma slider implemented and on unit 1; the full frequency sweep is still to do). **Applies to:** this board.
 
 <a id="q-gfx-06"></a>
 ### Q-GFX-06 `initDisplay()` aborts instead of failing when PSRAM is short
@@ -457,7 +457,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Symptom:** Internal RAM drains as you add screens, Arduino `String` bodies, JSON documents or FATFS objects.
 - **Root cause:** The core calls `heap_caps_malloc_extmem_enable(4096)` (`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL`). Anything smaller than 4 KB is taken from internal RAM first.
 - **Fix:** Use explicit PSRAM: `HeapBuf`/`psramAlloc` in `projects/05-powerwall-display/src/mem_util.h` for bodies and images; `JsonDocument doc(psramJson())` (ArduinoJson allocator) for JSON; LVGL's own PSRAM pool ([Q-LVGL-01](#q-lvgl-01)). Lowering the threshold globally was proposed in docs/12 and not done.
-- **Evidence:** LVGL pool change took free internal RAM from 38 KB to 140 KB with four screens (2026-10-10). Boot trace: ten screens cost 0 bytes of internal RAM (2026-10-11).
+- **Evidence:** LVGL pool change took free internal RAM from 38 KB to 140 KB with four screens (2026-10-10). Boot trace: ten screens (the count at the time; there are 11 now) cost 0 bytes of internal RAM (2026-10-11).
 - **Status:** worked-around. **Applies to:** any Arduino-ESP32 3.x with PSRAM.
 
 <a id="q-mem-04"></a>
@@ -493,7 +493,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Symptom:** Internal RAM drains as screens are added; TLS then fails.
 - **Root cause:** With the C allocator, every LVGL allocation under 4 KB (the `ALWAYSINTERNAL` threshold) goes to internal RAM, and nearly every widget is smaller than that.
 - **Fix:** LVGL's built-in heap with `LV_MEM_SIZE (1024*1024U)` and `#define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)` in `projects/05-powerwall-display/include/lv_conf.h`.
-- **Evidence:** Free internal RAM 38 KB to 140 KB with four screens (2026-10-10); the pool is 13-17 % used with ten screens.
+- **Evidence:** Free internal RAM 38 KB to 140 KB with four screens (2026-10-10); the pool is 13-17 % used with ten screens (the count at the time; 11 now).
 - **Status:** fixed. **Applies to:** LVGL 9 on ESP32 with PSRAM.
 
 <a id="q-lvgl-02"></a>
@@ -612,9 +612,9 @@ Status key: F fixed, W worked-around, O open, D documented.
 ### Q-NET-04 The gateway refuses some handshakes at about 30 per minute
 - **Symptom:** Intermittent `ssl_starttls_handshake(): (-30592) SSL - A fatal alert message was received from our peer` on the gateway, and once `aggregates HTTP 400`. The fetch jobs to public servers had 0 failures.
 - **Root cause (not proven):** The gateway answers a TLS handshake roughly every 2 s (one per poll in HTTP/1.0 mode, about 28 per minute) and sometimes sends a fatal alert. Suggestive, not conclusive: with keep-alive the same run had 22 connects and 1 refusal.
-- **Fix:** Optional keep-alive for `/aggregates` behind `-DPW_GW_KEEPALIVE=1`, with our de-chunker. Default stays 0 until soak-tested. The UI tolerates a failed poll (values go stale after 20 s).
-- **Evidence:** Soak logs, 2026-10-11. Four HTTP/1.0 runs logged 3, 1, 12 and 19 refusals (the last: 275 TLS connects in 591 s, about 28 per minute). The keep-alive run logged 1 refusal with 22 connects, 857 requests and 0 failures. The error code is mbedTLS `FATAL_ALERT_MESSAGE`. Why the count varies run to run is unknown.
-- **Status:** open. Investigation: [inv-gateway-handshake-refusals](03-investigations.md#inv-tls-gateway-refusals). **Applies to:** Powerwall 3 gateway, firmware 26.26.4.
+- **Fix:** Keep-alive for `/aggregates` (`PW_GW_KEEPALIVE`, with our de-chunker), the default since `c9a6630` after a 10-minute soak; `-DPW_GW_KEEPALIVE=0` restores the one-shot path. A long soak (several hours) is still pending. The UI tolerates a failed poll (values go stale after 20 s).
+- **Evidence:** Soak logs, 2026-10-11. Four HTTP/1.0 runs logged 3, 1, 12 and 19 refusals (the last: 275 TLS connects in 591 s, about 28 per minute; keep-alive was off in those runs). The keep-alive run logged 1 refusal with 22 connects, 857 requests and 0 failures. The error code is mbedTLS `FATAL_ALERT_MESSAGE`. Why the count varies run to run is unknown.
+- **Status:** worked-around (keep-alive on by default; long soak pending). Investigation: [inv-gateway-handshake-refusals](03-investigations.md#inv-tls-gateway-refusals). **Applies to:** Powerwall 3 gateway, firmware 26.26.4.
 
 <a id="q-net-05"></a>
 ### Q-NET-05 One TLS session at a time; job time budget vs stale data

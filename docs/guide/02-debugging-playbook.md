@@ -23,7 +23,7 @@ How to read it:
 | [D-06](#d-06-ab-builds) | A/B builds (change one thing) | method | medium (a flash cycle each) | temporary edit + `tools/pio.ps1` |
 | [D-07](#d-07-decode-backtraces) | Decode Guru Meditation and watchdog backtraces | post-mortem | low | `xtensa-esp32s3-elf-addr2line` |
 | [D-08](#d-08-timestamped-serial-capture) | Timestamped serial capture | host | low | pyserial script |
-| [D-09](#d-09-serial-command-interface) | Serial command interface | firmware | low | `s n p l b m x r h` |
+| [D-09](#d-09-serial-command-interface) | Serial command interface | firmware | low | `s n p l e b bf bd br bs y v m x c k r h` |
 | [D-10](#d-10-framebuffer-screenshots) | Framebuffer screenshots over serial | host + firmware | low | `tools-dev/screendump.py` |
 | [D-11](#d-11-soak-tests) | Soak tests and log summaries | method | medium (wall-clock) | capture + grep |
 | [D-12](#d-12-host-tests-with-msvc) | Host tests with MSVC | host | low | `hosttest/run.ps1` |
@@ -446,14 +446,26 @@ for ($k = 1; $k -le 5; $k++) {
 
 | Command | Does |
 |---|---|
-| `s <n>` | Go to screen `n` the way a swipe does (data refresh, slide, entry animations) |
-| `n` / `p` | Next / previous screen (wraps) |
-| `l` | List screens, current one marked `*` |
+| `s <n>` | Go to screen `n` (0..10) the way a swipe does (data refresh, slide, entry animations); `#err screen disabled` if `n` is switched off in Settings |
+| `n` / `p` | Next / previous **enabled** screen (like a swipe; wraps) |
+| `l` | List screens, current one marked `*`, disabled ones `-` |
+| `e [n 0\|1]` | Screens on/off (same as the Settings switches, saved); `e` alone lists the mask |
 | `b <0-255>` | Set backlight now (not saved; the panel driver cuts out below about 100) |
+| `bf <hz>` | Backlight PWM frequency 100..1000000 Hz (not saved) |
+| `bd <duty>` | Raw backlight duty at the current resolution (not saved) |
+| `br` | Report backlight frequency, resolution, duty, max, assumed minimum |
+| `bs [steps [ms [from [to]]]]` | Background duty sweep for watching the panel; `bs 0` or any `b`/`bd`/`bf` stops it |
+| `y [d\|w\|m\|-\|+]` | History screen tab / period; also prints the day-history store status |
+| `y s <1..50>` | Diagnostic: save today's record n times in a row (panel-drift investigation) |
+| `v <0\|1>` | Privacy mode for screenshots (not saved) |
 | `m` | Print the memory / heap line now |
 | `x` | Screenshot (see D-10) |
+| `c` | List the SD cache records (may do SD I/O; diagnostic) |
+| `k` | Diagnostic: force an RGB scan-out restart at the next VSYNC (panel drift, see D-21) |
 | `r` | Reboot (`ESP.restart()`; RTC data survives) |
 | `h` | Help |
+
+The source of truth is the comment block at the top of `projects/05-powerwall-display/src/main.cpp`; keep this table in step with it.
 
 ```powershell
 # a pyserial one-liner, or type into any serial terminal at 115200
@@ -461,7 +473,7 @@ $py = "$env:USERPROFILE\.platformio\penv\Scripts\python.exe"
 & $py -I -c "import serial,time; s=serial.Serial(); s.port='COM9'; s.baudrate=115200; s.timeout=2; s.dtr=False; s.rts=False; s.open(); s.write(b'l\n'); print(s.readline())"
 ```
 
-**What it told us.** Stepping through all ten screens over serial turned "I only tested the main screen" into a per-screen check, and it is the hook that makes D-10 possible. The commands were added at the user's request so every screen could be checked, after a stutter investigation that had only covered the main one.
+**What it told us.** Stepping through all the screens over serial (ten at the time, 11 now) turned "I only tested the main screen" into a per-screen check, and it is the hook that makes D-10 possible. The commands were added at the user's request so every screen could be checked, after a stutter investigation that had only covered the main one.
 
 **Pitfalls.**
 
@@ -490,7 +502,7 @@ Output per image: `shots\v1-0-house.png: 480x480, 0 missing rows, crc ok`. A `cr
 
 The working tree also has an uncommitted `--privacy` option (sends `v 1` / `v 0` so the firmware shows a placeholder Wi-Fi name and town while capturing). Check `--help` before publishing screenshots; treat the screen as containing local details until you have used it.
 
-**What it told us.** One `--all` run captured all 10 screens with good CRCs (about 460 KB each). Looking at them found two layout problems that no timing or heap number could show:
+**What it told us.** One `--all` run captured all 10 screens (the count at the time; 11 now) with good CRCs (about 460 KB each). Looking at them found two layout problems that no timing or heap number could show:
 
 - Bar charts built by the new `BarChart` helper were sized wrongly because their height was read before layout settled; the fix stores the height at creation time.
 - A "Geomagnetic" badge overflowed its chip, and a lifetime text line was too long on the health screen.
@@ -505,7 +517,7 @@ See [#inv-screenshot-layout-bugs](03-investigations.md#inv-barchart-empty). It a
 - `to_rgb()` handles rotations 0-3, but only rotation 3 (the project default) has been exercised. Check a new rotation against the real panel.
 - Other log lines can interleave, but each pixel row is one `Serial.write`, so a row is never split.
 
-**Cost.** About 7 s of transfer per screen (calculated: 480 rows of base64, about 614 KB, at 921600 baud) plus the 2 s settle time, so `--all` over ten screens is roughly 90 s.
+**Cost.** About 7 s of transfer per screen (calculated: 480 rows of base64, about 614 KB, at 921600 baud) plus the 2 s settle time, so `--all` over the 11 screens is roughly 100 s (about 90 s when there were ten).
 
 ---
 

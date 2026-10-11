@@ -4,7 +4,7 @@ The same pins are defined in code in [`common/lib/Board4848S040/src/Board4848S04
 
 **Sources:** unless a row says otherwise, every pin below matches the **vendor schematic** ([`vendor/schematic-1.png`](vendor/schematic-1.png), [`schematic-2.png`](vendor/schematic-2.png)), the vendor IO sheet, and the community configs (ESPHome, rzeldent, Arduino_GFX). Claims that aren't from the schematic are marked *(community)* or *(unverified)*.
 
-"Wiring confirmed" is not the same as "works": nothing in this repo has been run on hardware yet.
+"Wiring confirmed" is not the same as "works": function results on unit 1 are in [hardware-log.md](hardware-log.md) (display, touch, backlight, SD and more have run on hardware); rows below say what is only wired.
 
 ## Display: ST7701S
 | Function | GPIO |
@@ -52,7 +52,7 @@ Backlight minimum: the driver cuts out below roughly **100/255** at 100 kHz PWM 
 | SCK | 48 | CLK (shared with LCD SPI SCK) |
 | MISO | 41 | DAT0 (the vendor xlsx says "D1", which is wrong) |
 
-**Wiring confirmed by the schematic; function untested.**
+**Wiring confirmed by the schematic; function confirmed on unit 1 in SPI mode** (project 06 and 05's history store, see [hardware-log.md](hardware-log.md)).
 - **SPI mode only.** DAT1 and DAT2 go only to pull-ups (RN1/R15), so 4-bit SD_MMC isn't possible.
 - **No card-detect.** Software can't tell whether a card is inserted; try to mount it and handle the failure.
 - LCD SPI is only used during the init sequence. **Initialise the display first**, then `SPI.begin(48, 41, 47, 42); SD.begin(42, SPI, 1000000);`.
@@ -99,11 +99,11 @@ On unit 1 the 05 brightness slider (duty 100-255 at 100 kHz) made very little vi
 1. **Narrow range.** 100-255 is only 2.5x in duty, and perceived brightness is roughly logarithmic.
 2. **PWM too fast for the driver.** U5 is dimmed by gating its EN pin. A boost driver needs some start-up time on each EN pulse, and at 100 kHz each period is only 10 µs, so low and mid duties are compressed. This also explains why the cut-out is ~100 at 100 kHz but ~60 at a lower frequency.
 
-What is in the code now (nothing is flashed or measured yet; the default PWM frequency is still 100 kHz):
+What is in the code now (running on unit 1, owner-checked 2026-10-11; the default PWM frequency is still 100 kHz and the full frequency sweep is not done):
 - **A. Configurable PWM** (board library). `B4848_LCD_BL_FREQ_HZ` (default 100000) is the start-up frequency; a project can override it with `-DB4848_LCD_BL_FREQ_HZ=<hz>`. `board4848::setBacklightFrequency(hz)` retunes at run time, picks the highest duty resolution that frequency allows (f x 2^bits <= 40 MHz, capped at 12 bits; IDF 5.4's auto clock refused 100 kHz x 9 bits on hardware: **8 bits at 100 kHz, 10 bits at 20-25 kHz**) and rescales the current duty, so the brightness stays. `setBacklight(0..255)` keeps working (mapped onto the current resolution), plus `setBacklightLevel(0.0..1.0)`, `setBacklightDuty(raw)` and the getters `backlightFrequency/Resolution/Duty/DutyMax/MinDuty()`. `backlightMinDuty()` is `B4848_LCD_BL_MIN` (100/255) scaled to the current resolution and rounded up (100 at 8 bits, 402 at 10 bits). The same fraction is assumed at every frequency: that is safe if the real limit is a fraction of the period, and conservative if it is a minimum on-time. Re-measure it per frequency (below) and override `B4848_LCD_BL_MIN` once known.
 - **B. Gamma slider** (project 05, `src/backlight_curve.h`). The slider is 0-100 % and the saved value is that percentage (not the duty). `duty = minDuty + round((maxDuty - minDuty) * (pct/100)^2.2)`. **0 % is the dimmest level that is still lit** (`minDuty`), never off; `b 0` over serial still switches the backlight off. With 8 bits (155 usable steps) the lowest ~8 slider positions round to the same duty; at 10 bits (~620 steps) that flat zone shrinks to ~4. Old `settings.bin` files (raw duty, magic `SET1`) are converted on load to the percentage that gives the same duty; the file size is unchanged.
 
-### Hardware sweep (the user does this; nothing here is measured yet)
+### Hardware sweep (the user does this; the full sweep has not been done yet)
 Needs project 05 flashed and a serial monitor on its port (115200 baud, close the monitor before `pio upload`). All settings below are temporary (lost at reboot); the saved slider is not touched. Commands are in the project 05 README.
 
 For each frequency in the order **100000, 50000, 25000, 20000, 5000**:
