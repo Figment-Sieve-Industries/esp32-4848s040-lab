@@ -24,8 +24,13 @@ static void flushRot3(const lv_area_t *area, const uint16_t *px) {
     }
 }
 
+// 0 forces Arduino_GFX's own rotated draw (only for A/B benchmarks: 03-lvgl-demos env bench-rot3-gfx)
+#ifndef B4848_ROT3_FAST_FLUSH
+#define B4848_ROT3_FAST_FLUSH 1
+#endif
+
 static void flushCb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
-    if (s_gfx->getRotation() == 3 && area->x1 >= 0 && area->y1 >= 0 && area->x2 < B4848_LCD_WIDTH &&
+    if (B4848_ROT3_FAST_FLUSH && s_gfx->getRotation() == 3 && area->x1 >= 0 && area->y1 >= 0 && area->x2 < B4848_LCD_WIDTH &&
         area->y2 < B4848_LCD_HEIGHT) {
         flushRot3(area, (const uint16_t *)px);
     } else {

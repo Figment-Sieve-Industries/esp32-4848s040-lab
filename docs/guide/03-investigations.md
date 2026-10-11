@@ -749,7 +749,7 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 |---|---|
 | Date | 2026-10-11 |
 | Area | Display / performance |
-| Status | works on hw: owner, 2026-10-11: stutter "a lot less noticeable". Not fully gone: ~135-190 ms frames remain when all power-flow labels and the top-bar Wi-Fi label redraw together; a fix throttling the Wi-Fi label is in progress |
+| Status | works on hw: owner, 2026-10-11: stutter "a lot less noticeable". Not fully gone: ~135-190 ms frames remain when all power-flow labels and the top-bar Wi-Fi label redraw together; the Wi-Fi label is now throttled (see below), the rest is power-flow labels + chevrons |
 | Fix | `bd3f28d` Board4848S040: rotation-3 LVGL flush writes framebuffer rows contiguously and writes back only what changed; diagnostics in `300e7b5`; docs in `d6f1b22` |
 
 **Symptom.** "now it seems to stutter every once in a while on the main screen" (user).
@@ -790,7 +790,33 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 
 **Conclusion.** Arduino_GFX's rotated draw cost about half the time of the slow frames. The remaining 130-200 ms frames are many small areas: chevrons, the top bar and the weather icon in the same frame. The slow frames coincide with gateway polls (`net 1`) more often than not. Whether PSRAM contention from TLS lengthens them is not isolated (inferred).
 
-**Follow-ups.** Reduce the number of invalidated areas per frame ([inv-redraw-load](#inv-redraw-load)). Benchmark the new flush in `03-lvgl-demos` (`bench` env) with rotation 3; not done yet, although the repo rule asks for it for performance changes.
+**03 benchmark A/B** (2026-10-11, unit 1, v5 defaults; envs `bench` = rotation 0, `bench-rot3` = rotation 3 with `flushRot3()`, `bench-rot3-gfx` = rotation 3 with `-DB4848_ROT3_FAST_FLUSH=0`, i.e. Arduino_GFX's rotated draw). FPS [render ms / flush ms]:
+
+| Scene | rotation 0 | rotation 3, own flush | rotation 3, Arduino_GFX |
+|---|---|---|---|
+| Empty screen (full-screen flush) | 25 [10/20] | 21 [10/27] | 7 [9/110] |
+| Moving wallpaper | 17 [30/20] | 14 [34/27] | 5 [31/152] |
+| Screen sized text | 11 [60/20] | 10 [60/27] | 5 [61/123] |
+| Containers with scrolling | 15 [41/20] | 13 [40/28] | 5 [40/144] |
+| Multiple labels (small areas) | 32 [18/7] | 27 [19/11] | 28 [20/9] |
+| Widgets demo | 9 [57/17] | 8 [57/27] | 4 [57/122] |
+| **All scenes avg.** | **35 [22/9]** | **33 [23/13]** | **29 [22/49]** |
+
+Reading: render time is the same in all three, so the difference is the flush. A full-screen flush costs 20 ms at rotation 0, 27 ms with `flushRot3()` and 110-152 ms with Arduino_GFX's rotated draw (4-5x). Small, scattered areas cost about the same either way (flush 9-11 ms on "Multiple labels"): there the per-segment write-back dominates. The remaining ~7 ms gap to rotation 0 is the transposed (strided) read of the draw buffer. `flushRot3()` stays the default; `B4848_ROT3_FAST_FLUSH=0` exists only for this A/B.
+
+**Wi-Fi label throttle** (2026-10-11): `ui::topBarUpdate` now changes the RSSI text only when it moved by >= 3 dB, at most every 10 s. 10-minute soak (`soak-wifithrottle.log`) against the keep-alive soak:
+
+| | Keep-alive soak (before) | Throttle soak (after) |
+|---|---|---|
+| Power flows at the time | battery idle at 100%, grid near 0 (1-2 flows animating) | battery discharging ~10.5 kW, exporting ~7.4 kW (all 4 flows animating) |
+| Slow frames after boot (`[slow] render`) | 3 | 35 |
+| Of those, with the Wi-Fi label in the first areas | 2 | 4 |
+| Render time of slow frames | 134-189 ms | 143-232 ms (most 150-160 ms) |
+| Main-screen FPS (last heartbeat) | 59.4 | 40.6 |
+
+Reading: the throttle does what it should (the Wi-Fi label is rarely in a slow frame now), but the two soaks ran under very different loads, so the totals are not comparable. The slow frames are ~75-95 areas of ~100-150k px: the six power-flow value labels plus the moving chevrons, each chevron invalidated twice (old and new position). ~150 ms for ~100k px is far above the benchmark's cost per pixel, so the time is per-area overhead (each area re-renders every object under it: cards, borders, radius) rather than pixels (inferred).
+
+**Follow-ups.** Reduce the number of invalidated areas per frame ([inv-redraw-load](#inv-redraw-load)): fewer chevron invalidations (e.g. one parent area per flow line), and spreading the label updates of one poll over several frames. Not started; waiting for the owner's choice.
 
 **Sources.** `soak15.log`, `soak-flush.log`, `soak-flush2.log`, `soak-refactor.log`, `soak-keepalive.log`; transcript 2026-10-11; `bd3f28d` message; [hardware-log](../hardware-log.md) "Rotated flush".
 
@@ -821,7 +847,7 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 
 **Measurement.** A new heartbeat metric `redraw: <px>/s, <n> flushes/s` exists from `1f816a8` onwards. It has no before value. On the main screen it read 260,075-304,846 px/s and 234-256 flushes/s (`soak-refactor.log`), and up to 389,540 px/s and 333 flushes/s (`soak-keepalive.log`; depends on live flows, inferred).
 
-**Follow-ups.** Try 33 ms chevrons or one draw object per flow path, and compare FPS, px/s and flushes/s. The remaining ~135-190 ms frames (owner: stutter "a lot less noticeable", 2026-10-11) occur when all power-flow labels and the top-bar Wi-Fi label redraw together; a fix throttling the Wi-Fi label is in progress.
+**Follow-ups.** Try 33 ms chevrons or one draw object per flow path, and compare FPS, px/s and flushes/s. The remaining ~135-190 ms frames (owner: stutter "a lot less noticeable", 2026-10-11) occur when all power-flow labels and the top-bar Wi-Fi label redraw together; the Wi-Fi label is now throttled, see [inv-stutter-rotated-flush](#inv-stutter-rotated-flush) for the soak.
 
 **Sources.** Consolidation plan (session notes, 2026-10-11); `soak-refactor.log`; `soak-keepalive.log`; [05 README](../../projects/05-powerwall-display/README.md) (serial commands, heartbeat).
 

@@ -49,6 +49,8 @@ void formatKWh(char *buf, size_t n, double kwh);      // "0.8" / "18.4" / "1,234
 // Top bar: time (28), date (14), Wi-Fi icon + "SSID  -56 dBm" right-aligned. Same on every screen.
 struct TopBar {
     lv_obj_t *time, *date, *wifiIcon, *wifi;
+    int shownRssi = 0;     // dBm on screen: changes only by >= RSSI_STEP_DB, at most every RSSI_MIN_MS
+    uint32_t rssiMs = 0;   // millis() of the last change (0 = nothing shown yet)
 };
 TopBar topBarCreate(lv_obj_t *scr);
 void topBarUpdate(TopBar &tb);

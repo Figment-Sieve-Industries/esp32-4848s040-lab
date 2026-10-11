@@ -82,6 +82,11 @@ static void buildLauncher() {
     }
 }
 
+// 0 = native (default). The bench-rot3* envs use 3 (as project 05) to measure the rotated flush path.
+#ifndef SCREEN_ROTATION
+#define SCREEN_ROTATION 0
+#endif
+
 static void halt(const char *msg) {
     Serial.println(msg);
     while (true) delay(1000);
@@ -91,13 +96,14 @@ void setup() {
     Serial.begin(115200);
     delay(300);
 
-    gfx = board4848::initDisplay();
+    gfx = board4848::initDisplay(SCREEN_ROTATION);
     if (!gfx) halt("Display init failed (PSRAM missing? check memory_type = qio_opi)");
     gfx->fillScreen(RGB565_BLACK);
     board4848::setBacklight(255);
 
     bool hasTouch = touch.begin();
     if (!hasTouch) Serial.println("GT911 not found");
+    touch.setRotation(SCREEN_ROTATION);
     if (!board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr)) halt("LVGL draw buffer alloc failed");
     Serial.printf("Free internal heap: %lu, PSRAM: %lu\n", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                   (unsigned long)ESP.getFreePsram());

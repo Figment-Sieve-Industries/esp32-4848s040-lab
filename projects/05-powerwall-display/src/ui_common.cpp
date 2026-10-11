@@ -194,7 +194,17 @@ void topBarUpdate(TopBar &tb) {
         setText(tb.date, buf);
     }
     NetStatus n = networkStatus();
-    if (n.wifiUp) snprintf(buf, sizeof(buf), "%s  %d dBm", privacy() ? "Wi-Fi" : n.ssid, n.rssi);
+    // RSSI jitters by 1-3 dB on most polls; each change re-aligns two objects in the top bar, and it
+    // landed in the same frame as the power-flow label updates (the remaining ~150 ms frames). Show
+    // a new value only when it moved by RSSI_STEP_DB, at most every RSSI_MIN_MS.
+    constexpr int RSSI_STEP_DB = 3;
+    constexpr uint32_t RSSI_MIN_MS = 10000;
+    const uint32_t now = millis();
+    if (n.wifiUp && (tb.rssiMs == 0 || (abs(n.rssi - tb.shownRssi) >= RSSI_STEP_DB && now - tb.rssiMs >= RSSI_MIN_MS))) {
+        tb.shownRssi = n.rssi;
+        tb.rssiMs = now ? now : 1;
+    }
+    if (n.wifiUp) snprintf(buf, sizeof(buf), "%s  %d dBm", privacy() ? "Wi-Fi" : n.ssid, tb.shownRssi);
     else snprintf(buf, sizeof(buf), "offline");
     setTextColor(tb.wifi, n.wifiUp ? MUTED : C_ALERT);
     if (strcmp(lv_label_get_text(tb.wifi), buf) != 0) { // re-align only when the width may have changed
