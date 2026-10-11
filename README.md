@@ -11,6 +11,8 @@ More projects will be added over time. The [projects table](#projects) lists eve
 
 A wall-mounted energy monitor for **Tesla Powerwall 3** owners. The ESP32 talks straight to the **Powerwall gateway's local API** over your home Wi-Fi, so it keeps working when the internet or Tesla's servers do not, and nothing about your home leaves the network. Built with **LVGL 9** on the **ESP32-S3**, it shows live **solar**, **home battery**, grid and house load as an **energy monitor** you can glance at in the hall.
 
+**Own a Powerwall 3 and want one?** Start with **[Getting started: run the Powerwall 3 display on your own board](docs/getting-started-powerwall.md)**: shopping list, finding your gateway, setup, flashing and troubleshooting.
+
 <table>
   <tr>
     <td align="center"><a href="docs/images/screens/05-0-house.png"><img src="docs/images/screens/05-0-house.png" width="240" alt="Power flow screen: solar, grid, home load and Powerwall as pills around a house, with weather and grid status"></a><br>Power flow</td>
@@ -117,6 +119,8 @@ Hardware documents:
 Buy the capacitive-touch version **without relays** unless you want them. Listings for sale, with notes, are in [docs/guide/06-hardware-and-sourcing.md](docs/guide/06-hardware-and-sourcing.md). The unit used for this repository came from this eBay UK listing, which may have ended: <https://www.ebay.co.uk/itm/147605654410>. Other verified listings (eBay UK and AliExpress) are on the same page. **Prices change**, so check the listing and the model option (`ESP32-4848S040`) before ordering.
 
 ## Quick start
+
+Building the Powerwall display for your own home? Follow [docs/getting-started-powerwall.md](docs/getting-started-powerwall.md) instead; it covers the same steps with the Powerwall-specific setup.
 
 Use **PowerShell** (or VS Code's PlatformIO buttons). Do not use Git Bash: ESP's tool installer rejects MSYS shells and the first build fails (see [docs/07](docs/07-gotchas.md)).
 
