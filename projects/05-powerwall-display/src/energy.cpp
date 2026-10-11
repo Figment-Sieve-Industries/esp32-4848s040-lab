@@ -1,16 +1,18 @@
 // Today's energy from lifetime counters, with the midnight baseline in RTC memory.
 // RTC_NOINIT_ATTR data survives software resets, crashes and OTA restarts but not a power cut,
-// and is never written to flash (no wear).
+// and is never written to flash (no wear). A copy goes to the SD card (history.cpp) on every new
+// baseline and every 5 minutes; after a power cut it is restored from there.
 #include "energy.h"
+#include "history.h"
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <stddef.h>
 #include <string.h>
+#include <type_traits>
 
 namespace {
 
 constexpr uint32_t MAGIC = 0x50574532; // "PWE2" (layout changed: lastSeen added)
-constexpr uint32_t STALE_MS = 10000;      // ignore data older than this
 constexpr time_t CLEAN_GAP_S = 10 * 60;   // last reading within 10 min before midnight = clean rollover
 
 struct Baseline {
@@ -27,6 +29,14 @@ struct Baseline {
     uint32_t check;
 };
 
+// The checksum below hashes raw bytes, including any padding between members. That is only
+// deterministic because startDay() memset()s the whole struct before filling it, and later updates
+// assign members only (never copy a Baseline built elsewhere). Keep it trivially copyable/standard
+// layout so memset and offsetof stay well defined.
+// NOLINTNEXTLINE(misc-redundant-expression): two different traits, not a repeated expression
+static_assert(std::is_standard_layout<Baseline>::value && std::is_trivially_copyable<Baseline>::value,
+              "Baseline is hashed and zeroed as raw bytes");
+
 RTC_NOINIT_ATTR Baseline rtc;
 
 uint32_t checksum(const Baseline &b) {
@@ -39,7 +49,34 @@ uint32_t checksum(const Baseline &b) {
 bool rtcValid() { return rtc.magic == MAGIC && rtc.check == checksum(rtc); }
 void rtcSeal() { rtc.check = checksum(rtc); }
 
+// SD backup of the baseline (history.cpp), so a power cut doesn't turn today into a partial day.
+constexpr uint32_t BACKUP_EVERY_MS = 5 * 60 * 1000;
+constexpr uint32_t RESTORE_WAIT_MS = 20000; // after boot, wait this long for the card before giving up
+bool restoreTried = false;
+uint32_t lastBackupMs = 0;
+
+// Called with an invalid RTC copy (power cut). Returns false to mean "wait, the card isn't read yet".
+bool tryRestore() {
+    if (restoreTried) return true;
+    if (!historyStatus().firstMountDone && millis() < RESTORE_WAIT_MS) return false;
+    restoreTried = true;
+    Baseline b;
+    if (historyLoadBaseline(&b, sizeof(b)) && b.magic == MAGIC && b.check == checksum(b)) {
+        memcpy(&rtc, &b, sizeof(rtc)); // byte copy: assignment needn't copy the hashed padding
+        Serial.println("Energy: baseline restored from SD card");
+    }
+    return true;
+}
+
+void backup(bool now) {
+    if (!now && millis() - lastBackupMs < BACKUP_EVERY_MS) return;
+    lastBackupMs = millis();
+    historySaveBaseline(&rtc, sizeof(rtc));
+}
+
 TodayStats stats;
+uint32_t statsUpdatedMs = 0;  // d.updatedMs of the reading that produced `stats`
+int statsYear = -1, statsYday = -1; // local date `stats` belongs to
 
 void startDay(const PwData &d, const struct tm &tm, time_t now, bool partial) {
     memset(&rtc, 0, sizeof(rtc));
@@ -94,13 +131,16 @@ time_t midnightOf(time_t t) {
 
 void energyUpdate(const PwData &d) {
     // Only fresh data: frozen counters during an outage would put a whole gap into one baseline/bin
-    if (!d.valid || millis() - d.updatedMs > STALE_MS) return;
+    if (!d.valid || millis() - d.updatedMs > PW_STALE_MS) return;
+    if (d.solarExportedWh <= 0 || d.loadImportedWh <= 0) return; // never baseline on zero counters
     time_t now = time(nullptr);
     struct tm tm;
     localtime_r(&now, &tm);
     if (tm.tm_year < 124) return; // clock not synced yet (before 2024)
+    if (!rtcValid() && !tryRestore()) return; // power cut: give the SD card a moment first
 
     bool reset = !countersSane(d);
+    bool newBaseline = false;
     if (reset || !rtcValid() || rtc.year != tm.tm_year || rtc.yday != tm.tm_yday) {
         // A clean rollover needs a reading from just before this midnight; otherwise the counters at
         // the first reading of the day include an unknown amount of yesterday -> partial day.
@@ -123,6 +163,7 @@ void energyUpdate(const PwData &d) {
         }
         Serial.printf("Energy: new baseline (%s)%s\n", clean ? "midnight" : "partial day",
                       reset ? " after counter reset" : "");
+        newBaseline = true;
     }
     // Close finished hour bins. After a data gap of more than 30 min, the energy generated during
     // the gap can't be placed in the right hours: the bin is closed with only what was seen before
@@ -138,6 +179,7 @@ void energyUpdate(const PwData &d) {
     }
     remember(d, now);
     rtcSeal();
+    backup(newBaseline);
 
     TodayStats s;
     s.valid = true;
@@ -157,6 +199,18 @@ void energyUpdate(const PwData &d) {
     s.currentHour = tm.tm_hour;
     s.hourlySolarKWh[tm.tm_hour] = (d.solarExportedWh - rtc.hourSolarStart) / 1000.0; // in progress
     stats = s;
+    statsUpdatedMs = d.updatedMs;
+    statsYear = tm.tm_year;
+    statsYday = tm.tm_yday;
 }
 
-TodayStats energyToday() { return stats; }
+// Totals are only returned while they are fresh and still belong to today's local date;
+// otherwise an invalid TodayStats (the screen shows "--") rather than old or yesterday's totals.
+TodayStats energyToday() {
+    if (!stats.valid || millis() - statsUpdatedMs > PW_STALE_MS) return TodayStats();
+    time_t now = time(nullptr);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    if (tm.tm_year != statsYear || tm.tm_yday != statsYday) return TodayStats();
+    return stats;
+}

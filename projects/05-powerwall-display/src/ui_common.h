@@ -12,7 +12,10 @@ extern const lv_color_t C_SOLAR, C_GRID, C_HOME, C_BATT, C_ALERT, C_ALERT_BG, C_
 // Mains voltage normal range (230 V nominal, 207-253 V)
 constexpr float MAINS_V_MIN = 207.0f, MAINS_V_MAX = 253.0f;
 
-constexpr int SCREEN_COUNT = 4; // 0 = house (B), 1 = today (G), 2 = battery & grid (H), 3 = weather (I)
+// 0 = house (N/O), 1 = today (G), 2 = battery & grid (H), 3 = weather (I), 4 = moon (P),
+// 5 = aurora (Q), 6 = settings, 7 = about
+constexpr int SCREEN_COUNT = 8;
+enum ScreenIndex { SCR_HOUSE, SCR_TODAY, SCR_HEALTH, SCR_WEATHER, SCR_MOON, SCR_AURORA, SCR_SETTINGS, SCR_ABOUT };
 
 // Fonts available (built-in Montserrat): 12 14 16 18 20 22 26 28 30 40 48.
 // Built-in fonts have ASCII + degree sign (use "\xC2\xB0") but NO middle dot: use "/" or "-".

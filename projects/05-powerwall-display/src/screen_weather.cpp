@@ -18,7 +18,6 @@ constexpr int HOUR_W = (INNER_W - HOUR_GAP * (HOURS - 1)) / HOURS; // 64
 constexpr int LIFE_GAP = 8;
 constexpr int LIFE_W = (INNER_W - LIFE_GAP * 2) / 3;     // 129
 constexpr int COND_W = 220;
-constexpr uint32_t PW_STALE_MS = 10000;
 
 ui::TopBar topBar;
 lv_obj_t *icoBig, *lblTemp, *lblCond, *lblFeels, *lblHiLo;

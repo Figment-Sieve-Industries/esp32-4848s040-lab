@@ -1,17 +1,18 @@
-// Screen 1 - power flow, design "M" (values in pills), 480x480 rotated (USB-C at the bottom):
+// Screen 1 - power flow, design "N" (home pill, bigger bottom pills), 480x480 rotated (USB-C at the bottom):
 //
 //   13:05  Sat 10 Oct                     (wifi) <home-ssid>  -62 dBm
 //   ( SOLAR 3.68 kW )--->---+        [ weather / rain% / grid status ]
-//                           v
-//                         /HOME\
-//          +------<-------|    |------->------+
-//          v             566 W                v
-//                 [240.6 V] [622 VA / -258 var]
-//   ( GRID 1.58 kW )                    ( POWERWALL 98% )
-//   [Exporting] [1.60 kVA / -258 var]   [Charging 1.55 kW]
+//   [TODAY            ]     v
+//   [Self-powered 86% ]   /HOME\
+//   [Exported 6.1 kWh ]
+//          +------<-------+------->------+
+//          v   ( HOME 566 W | 240.6 V )   v
+//   ( GRID 1.58 kW      )                ( POWERWALL 98%     )
+//   ( 1.60 kVA/-258 var )                ( Charging 1.55 kW  )
 //                          o == o o
 //
 // Chevrons travel along each elbow in the direction power flows; more power = faster.
+#include "energy.h"
 #include "icons.h"
 #include "powerwall.h"
 #include "screens.h"
@@ -24,12 +25,22 @@ using namespace ui;
 namespace {
 
 constexpr float MIN_FLOW_W = 30;
-constexpr uint32_t STALE_MS = 10000;
 constexpr float CHEVRON_SPACING = 64; // px between chevrons along a path
 constexpr int MAX_CHEVRONS = 6;
 const lv_color_t CHIP_TEXT = lv_color_hex(0xC9D1D9);
-constexpr int BATT_PILL_W = 162;
-constexpr int SOC_BAR_W = BATT_PILL_W - 44; // inset 22 px each side
+constexpr int BIG_PILL_W = 176, BIG_PILL_H = 76;
+// Battery graphic in the Powerwall pill: inner width 176 - 2*3 border - 2*14 padding = 142 =
+// body + 2 px gap + 4 px nub. The fill sits inside the body's 2 px border and 2 px padding.
+constexpr int BATT_BODY_W = 136;
+constexpr int SOC_FILL_W = BATT_BODY_W - 8;
+
+// Battery fill colour by charge level: red < 15% < orange < 30% < yellow < 50% < green
+lv_color_t socColor(float soc) {
+    if (soc < 15) return lv_color_hex(0xE5484D);
+    if (soc < 30) return lv_color_hex(0xFF8A3D);
+    if (soc < 50) return lv_color_hex(0xF5D400);
+    return lv_color_hex(0x3DDC84);
+}
 
 lv_obj_t *scr;
 
@@ -122,8 +133,8 @@ lv_obj_t *lblStatusLine;
 lv_obj_t *wCard, *icoWeather, *lblTemp, *lblCond, *lblHiLo, *rainRow, *lblRain, *statusDot, *lblGridStatus;
 lv_obj_t *vppDot, *lblVpp;
 bool vppShownActive = true; // forces the first refresh to style the row
-lv_obj_t *valSolar, *valHome, *valGrid, *valSoc, *icoBatt, *socFill;
-lv_obj_t *chipVolt, *chipHomeVa, *chipGridDir, *chipGridVa, *chipBatt;
+lv_obj_t *valSolar, *valHome, *valGrid, *valSoc, *socFill;
+lv_obj_t *lblVolt, *lblHomeVa, *lblGridVa, *lblBatt, *valSelf, *valExp;
 int weatherIconKey = -100;
 uint32_t lastAnimMs;
 
@@ -137,48 +148,47 @@ lv_obj_t *track(int x, int y, int w, int h) {
     return o;
 }
 
-// w x 56 pill: icon left, caption over value. Returns the value label; *iconOut gets the icon.
-lv_obj_t *pill(int x, int y, int w, lv_color_t color, Icon icon, const char *cap, lv_obj_t **pillOut = nullptr,
-               lv_obj_t **iconOut = nullptr) {
+// Rounded pill with a coloured 3 px border and CARD background.
+lv_obj_t *pillBox(int x, int y, int w, int h, int radius, lv_color_t color) {
     lv_obj_t *p = box(scr);
     lv_obj_set_pos(p, x, y);
-    lv_obj_set_size(p, w, 56);
-    lv_obj_set_style_radius(p, 28, 0);
+    lv_obj_set_size(p, w, h);
+    lv_obj_set_style_radius(p, radius, 0);
     lv_obj_set_style_bg_color(p, CARD, 0);
     lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(p, color, 0);
     lv_obj_set_style_border_width(p, 3, 0);
+    return p;
+}
+
+// Pill: icon left, caption over value (over an optional 12 px sub line). Returns the value label.
+// With subOut the pill is the tall 176x76 variant; dy shifts the content vertically.
+lv_obj_t *pill(int x, int y, int w, lv_color_t color, Icon icon, const char *cap, lv_obj_t **pillOut = nullptr,
+               lv_obj_t **iconOut = nullptr, lv_obj_t **subOut = nullptr, int dy = 0) {
+    bool tall = subOut != nullptr;
+    lv_obj_t *p = tall ? pillBox(x, y, w, BIG_PILL_H, 24, color) : pillBox(x, y, w, 56, 28, color);
     lv_obj_t *i = iconCreate(p, icon, 28, color);
-    lv_obj_align(i, LV_ALIGN_LEFT_MID, 11, 0); // 14 px from the outer edge (3 px border)
+    lv_obj_align(i, LV_ALIGN_LEFT_MID, 11, dy); // 14 px from the outer edge (3 px border)
     lv_obj_t *col = box(p);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(col, 2, 0);
-    lv_obj_align(col, LV_ALIGN_LEFT_MID, 47, 0);
+    lv_obj_align(col, LV_ALIGN_LEFT_MID, 47, dy);
     caption(col, color, cap);
     lv_obj_t *v = label(col, &lv_font_montserrat_20, TEXT, "--");
+    if (tall) *subOut = label(col, &lv_font_montserrat_12, CHIP_TEXT, "--");
     if (pillOut) *pillOut = p;
     if (iconOut) *iconOut = i;
     return v;
 }
 
-// Small tag chip: 22 px tall, TRACK background, 12 px text
-lv_obj_t *chip(lv_obj_t *parent, const char *text) {
-    lv_obj_t *l = label(parent, &lv_font_montserrat_12, CHIP_TEXT, text);
-    lv_obj_set_height(l, 22);
-    lv_obj_set_style_pad_hor(l, 10, 0);
-    lv_obj_set_style_pad_top(l, 4, 0);
-    lv_obj_set_style_radius(l, 10, 0);
-    lv_obj_set_style_bg_color(l, TRACK, 0);
-    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
-    return l;
-}
-
-lv_obj_t *chipRow(int gap) {
-    lv_obj_t *r = box(scr);
+// Card row: label left, value right, both bottom-aligned
+lv_obj_t *statRow(lv_obj_t *parent, const lv_font_t *lf, lv_color_t lc, const char *text, const lv_font_t *vf) {
+    lv_obj_t *r = box(parent);
+    lv_obj_set_width(r, lv_pct(100));
     lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(r, gap, 0);
-    return r;
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    label(r, lf, lc, text);
+    return label(r, vf, TEXT, "--");
 }
 
 lv_obj_t *row(lv_obj_t *parent, int gap) {
@@ -213,55 +223,91 @@ lv_obj_t *houseCreate() {
     // Tracks (drawn first so pills and the house cover their ends)
     track(162, 90, 80, 4);
     track(238, 92, 4, 104);
-    track(85, 234, 122, 4);
-    track(85, 236, 4, 124);
-    track(273, 234, 116, 4);
-    track(385, 236, 4, 124);
+    track(85, 258, 122, 4);
+    track(85, 260, 4, 102);
+    track(273, 258, 122, 4);
+    track(391, 260, 4, 102);
 
     // Flow paths, forward = solar->house, house->grid (export), house->battery (charge)
     pathCreate(paths[P_SOLAR], {162, 92}, {240, 92}, {240, 196}, C_SOLAR);
-    pathCreate(paths[P_GRID], {207, 236}, {87, 236}, {87, 360}, C_GRID);
-    pathCreate(paths[P_BATT], {273, 236}, {387, 236}, {387, 360}, C_BATT);
+    pathCreate(paths[P_GRID], {207, 260}, {87, 260}, {87, 360}, C_GRID);
+    pathCreate(paths[P_BATT], {273, 260}, {393, 260}, {393, 360}, C_BATT);
 
-    // House, home value and its chips
+    // House
     lv_obj_t *house = iconCreate(scr, Icon::House, 120, C_HOME, 1.4f);
     lv_obj_set_pos(house, 180, 176);
-    valHome = label(scr, &lv_font_montserrat_26, TEXT, "--");
-    lv_obj_set_width(valHome, 180);
-    lv_obj_set_style_text_align(valHome, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(valHome, 150, 293);
-    lv_obj_t *homeChips = chipRow(6);
-    chipVolt = chip(homeChips, "--");
-    chipHomeVa = chip(homeChips, "--");
-    lv_obj_align(homeChips, LV_ALIGN_TOP_MID, 0, 326);
+
+    // Home pill under the house: watts left, divider, voltage and VA/var right
+    lv_obj_t *homePill = pillBox(114, 288, 252, 60, 30, C_HOME);
+    lv_obj_set_flex_flow(homePill, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(homePill, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(homePill, 15, 0);
+    lv_obj_set_style_pad_column(homePill, 10, 0);
+    lv_obj_t *hcol = box(homePill);
+    lv_obj_set_flex_flow(hcol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(hcol, 2, 0);
+    caption(hcol, C_HOME, "HOME");
+    valHome = label(hcol, &lv_font_montserrat_22, TEXT, "--");
+    lv_obj_t *hdiv = box(homePill);
+    lv_obj_set_size(hdiv, 1, 36);
+    lv_obj_set_style_bg_color(hdiv, TRACK, 0);
+    lv_obj_set_style_bg_opa(hdiv, LV_OPA_COVER, 0);
+    lv_obj_t *vcol = box(homePill);
+    lv_obj_set_flex_flow(vcol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(vcol, 4, 0);
+    lblVolt = label(vcol, &lv_font_montserrat_12, CHIP_TEXT, "--");
+    lblHomeVa = label(vcol, &lv_font_montserrat_12, CHIP_TEXT, "--");
+
+    // Today card (left, under the solar pill)
+    lv_obj_t *tCard = card(scr, 12, 134, 170, 108);
+    lv_obj_set_style_pad_hor(tCard, 14, 0);
+    lv_obj_set_style_pad_ver(tCard, 10, 0);
+    lv_obj_set_style_pad_row(tCard, 6, 0);
+    lv_obj_set_style_border_color(tCard, TRACK, 0);
+    lv_obj_set_style_border_width(tCard, 2, 0);
+    lv_obj_set_flex_flow(tCard, LV_FLEX_FLOW_COLUMN);
+    caption(tCard, MUTED, "TODAY");
+    valSelf = statRow(tCard, &lv_font_montserrat_12, C_BATT, "Self-powered", &lv_font_montserrat_22);
+    valExp = statRow(tCard, &lv_font_montserrat_12, C_GRID, "Exported", &lv_font_montserrat_18);
 
     // Pills
     valSolar = pill(12, 64, 150, C_SOLAR, Icon::Sun, "SOLAR");
-    valGrid = pill(12, 360, 150, C_GRID, Icon::Pylon, "GRID");
-    lv_obj_t *battPill;
-    // Wider than the others so "POWERWALL" fits next to the icon
-    valSoc = pill(306, 360, BATT_PILL_W, C_BATT, Icon::Battery, "POWERWALL", &battPill, &icoBatt);
-    // Thin SOC bar inside the bottom of the Powerwall pill
-    lv_obj_t *socTrack = box(battPill);
-    lv_obj_set_size(socTrack, SOC_BAR_W, 4);
-    lv_obj_set_pos(socTrack, 19, 43);
-    lv_obj_set_style_radius(socTrack, 2, 0);
-    lv_obj_set_style_bg_color(socTrack, TRACK, 0);
-    lv_obj_set_style_bg_opa(socTrack, LV_OPA_COVER, 0);
-    socFill = box(socTrack);
-    lv_obj_set_size(socFill, 0, 4);
+    valGrid = pill(12, 362, BIG_PILL_W, C_GRID, Icon::Pylon, "GRID", nullptr, nullptr, &lblGridVa);
+    // Powerwall pill (design O): caption, a full-width battery filled to the charge level (colour by
+    // level) with the % on a dark badge in its centre, then the charge rate on its own line
+    lv_obj_t *battPill = pillBox(292, 362, BIG_PILL_W, BIG_PILL_H, 24, C_BATT);
+    lv_obj_set_style_pad_hor(battPill, 14, 0);
+    lv_obj_set_style_pad_ver(battPill, 6, 0);
+    lv_obj_set_flex_flow(battPill, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(battPill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(battPill, 4, 0);
+    caption(battPill, C_BATT, "POWERWALL");
+    lv_obj_t *battRow = row(battPill, 2);
+    lv_obj_t *body = box(battRow);
+    lv_obj_set_size(body, BATT_BODY_W, 24);
+    lv_obj_set_style_border_color(body, C_BATT, 0);
+    lv_obj_set_style_border_width(body, 2, 0);
+    lv_obj_set_style_radius(body, 5, 0);
+    lv_obj_set_style_pad_all(body, 2, 0);
+    socFill = box(body);
+    lv_obj_set_size(socFill, 0, lv_pct(100));
     lv_obj_set_style_radius(socFill, 2, 0);
     lv_obj_set_style_bg_color(socFill, C_BATT, 0);
     lv_obj_set_style_bg_opa(socFill, LV_OPA_COVER, 0);
-
-    // Chips under the bottom pills
-    lv_obj_t *gridChips = chipRow(6);
-    lv_obj_set_pos(gridChips, 12, 424);
-    chipGridDir = chip(gridChips, "--");
-    chipGridVa = chip(gridChips, "--");
-    lv_obj_t *battChips = chipRow(6);
-    chipBatt = chip(battChips, "--");
-    lv_obj_align(battChips, LV_ALIGN_TOP_RIGHT, -12, 424);
+    // Dark badge keeps the % readable over any fill colour and over the empty part
+    valSoc = label(body, &lv_font_montserrat_14, TEXT, "--%");
+    lv_obj_set_style_bg_color(valSoc, BG, 0);
+    lv_obj_set_style_bg_opa(valSoc, LV_OPA_80, 0);
+    lv_obj_set_style_radius(valSoc, 4, 0);
+    lv_obj_set_style_pad_hor(valSoc, 6, 0);
+    lv_obj_set_style_pad_ver(valSoc, 1, 0);
+    lv_obj_align(valSoc, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_t *nub = box(battRow);
+    lv_obj_set_size(nub, 4, 10);
+    lv_obj_set_style_radius(nub, 2, 0);
+    lv_obj_set_style_bg_color(nub, C_BATT, 0);
+    lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
+    lblBatt = label(battPill, &lv_font_montserrat_12, CHIP_TEXT, "--");
 
     topBar = topBarCreate(scr);
 
@@ -329,8 +375,9 @@ lv_obj_t *houseCreate() {
 
 void houseRefresh() {
     PwData d = powerwallData();
+    TodayStats ts = energyToday();
     WeatherData w = weatherData();
-    bool stale = !d.valid || millis() - d.updatedMs > STALE_MS;
+    bool stale = !d.valid || millis() - d.updatedMs > PW_STALE_MS;
     char buf[64];
 
     topBarUpdate(topBar);
@@ -395,11 +442,10 @@ void houseRefresh() {
         setText(valSolar, "--");
         setText(valHome, "--");
         setText(valGrid, "--");
-        setText(chipVolt, "--");
-        setText(chipHomeVa, "--");
-        setText(chipGridDir, "--");
-        setText(chipGridVa, "--");
-        setText(chipBatt, "--");
+        setText(lblVolt, "--");
+        setText(lblHomeVa, "--");
+        setText(lblGridVa, "--");
+        setText(lblBatt, "--");
         setText(valSoc, "--%"); // don't leave a frozen SOC on screen
         setWidth(socFill, 0);
         setText(lblStatusLine, d.error[0] ? d.error : "Waiting for Powerwall...");
@@ -411,28 +457,27 @@ void houseRefresh() {
         formatPower(buf, sizeof(buf), d.siteW);
         setText(valGrid, buf);
 
-        // Home chips: voltage (amber outside the normal range) and VA / var
+        // Home pill: voltage (amber outside the normal range) and VA / var
         if (d.voltageV > 50) {
             snprintf(buf, sizeof(buf), "%.1f V", d.voltageV);
-            setText(chipVolt, buf);
-            setTextColor(chipVolt, d.voltageV < MAINS_V_MIN || d.voltageV > MAINS_V_MAX ? C_SOLAR : CHIP_TEXT);
+            setText(lblVolt, buf);
+            setTextColor(lblVolt, d.voltageV < MAINS_V_MIN || d.voltageV > MAINS_V_MAX ? C_SOLAR : CHIP_TEXT);
         } else {
-            setText(chipVolt, "-- V");
+            setText(lblVolt, "-- V");
         }
         formatVaVar(buf, sizeof(buf), d.loadVA, d.loadVar);
-        setText(chipHomeVa, buf);
+        setText(lblHomeVa, buf);
 
-        // Grid chips
-        setText(chipGridDir, offGrid ? "Outage" : fabsf(d.siteW) < MIN_FLOW_W ? "Idle" : d.siteW > 0 ? "Importing" : "Exporting");
+        // Grid pill VA / var (also shown during an outage)
         formatVaVar(buf, sizeof(buf), d.siteVA, d.siteVar);
-        setText(chipGridVa, buf);
+        setText(lblGridVa, buf);
 
         // Powerwall
         if (d.socValid) {
             snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(d.soc));
             setText(valSoc, buf);
-            iconSetBatteryLevel(icoBatt, d.soc);
-            setWidth(socFill, (int32_t)lroundf(SOC_BAR_W * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
+            setWidth(socFill, (int32_t)lroundf(SOC_FILL_W * fminf(fmaxf(d.soc, 0), 100) / 100.0f));
+            setBgColor(socFill, socColor(d.soc));
         } else {
             setText(valSoc, "--%");
             setWidth(socFill, 0);
@@ -441,9 +486,24 @@ void houseRefresh() {
         formatPower(pw, sizeof(pw), d.batteryW);
         if (fabsf(d.batteryW) < MIN_FLOW_W) snprintf(buf, sizeof(buf), "Idle");
         else snprintf(buf, sizeof(buf), "%s %s", d.batteryW > 0 ? "Discharging" : "Charging", pw);
-        setText(chipBatt, buf);
-        lv_obj_align(lv_obj_get_parent(chipBatt), LV_ALIGN_TOP_RIGHT, -12, 424); // keep right-aligned as text changes
+        setText(lblBatt, buf);
         setText(lblStatusLine, "");
+    }
+
+    // Today card (energy totals; independent of live-data staleness)
+    if (ts.valid && ts.selfPoweredPct >= 0) {
+        snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(ts.selfPoweredPct));
+        setText(valSelf, buf);
+    } else {
+        setText(valSelf, "--");
+    }
+    if (ts.valid) {
+        char kwh[16];
+        formatKWh(kwh, sizeof(kwh), ts.exportKWh);
+        snprintf(buf, sizeof(buf), "%s kWh", kwh);
+        setText(valExp, buf);
+    } else {
+        setText(valExp, "--");
     }
 
     // Flows: forward = solar->house, house->grid (export), house->battery (charge)

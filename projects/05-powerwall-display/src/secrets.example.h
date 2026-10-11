@@ -23,5 +23,5 @@ static const WifiCred WIFI_NETWORKS[] = {
 
 // Weather location (Open-Meteo, no API key). Kept here because it's your home location.
 #define WEATHER_LAT 51.5072
-#define WEATHER_LON -0.1276
+#define WEATHER_LON (-0.1276) // parenthesised: a bare negative macro breaks in expressions like a-WEATHER_LON
 #define WEATHER_NAME "LONDON" // shown on the weather screen

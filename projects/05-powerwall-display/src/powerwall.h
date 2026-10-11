@@ -14,6 +14,11 @@
 #define PW_SOC_APP_SCALE 1
 #endif
 
+// Gateway data older than this is treated as stale by the UI and by energy.cpp ("--" / dimmed).
+// Must tolerate one weather fetch, which holds the TLS lock and pauses gateway polling
+// (bounded to ~13 s by the timeouts in fetchWeather) plus the reconnect afterwards.
+constexpr uint32_t PW_STALE_MS = 20000;
+
 // Weather older than this is treated as stale by the UI ("--" / dimmed).
 constexpr uint32_t WEATHER_STALE_MS = 60UL * 60UL * 1000UL;
 
@@ -51,6 +56,7 @@ struct WeatherData {
     bool valid = false;
     float tempC = 0, feelsC = 0, windKmh = 0, hiC = 0, loC = 0;
     int rainPct = -1;           // today's max precipitation probability
+    int cloudPct = -1;          // current total cloud cover % (-1 unknown)
     int code = -1;              // WMO weather code
     bool isDay = true;
     WeatherHour hours[6];       // now, +2 h ... +10 h

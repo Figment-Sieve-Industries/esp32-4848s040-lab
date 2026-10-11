@@ -94,5 +94,15 @@ Wire1.begin(1, 40, 400000);   // I2C_NUM_1; Wire is the GT911 bus
 
 This needs the relay/audio links removed, or no relay board. 3.3 V for sensors is available on test pad **S3** (S4 = GND). Alternatively, put extra I2C devices on the touch bus, as long as nothing clashes with 0x5D/0x14 and the GPIO45 warning above is respected.
 
+## Backlight dimming range *(planned, not yet done)*
+On unit 1 the 05 brightness slider (duty 100-255 at 100 kHz) makes very little visible difference (user report, 2026-10-11). Likely causes:
+1. **Narrow range.** 100-255 is only 2.5x in duty, and perceived brightness is roughly logarithmic.
+2. **PWM too fast for the driver.** U5 is dimmed by gating its EN pin. A boost driver needs some start-up time on each EN pulse, and at 100 kHz each period is only 10 µs, so low and mid duties are compressed. This also explains why the cut-out is ~100 at 100 kHz but ~60 at a lower frequency.
+
+Planned fix, in this order:
+- **A. Lower the PWM frequency to ~20-25 kHz** (still above hearing). Measure first with a serial-driven sweep in `06-sd-card-test` (or a small bench project): step frequency (100, 50, 25, 20 kHz) and duty (0-255) while someone watches the panel and listens for whine. Pick the lowest silent frequency with an even response, then measure the true minimum duty and update `setBacklight()` and `B4848_LCD_BL_MIN` in the board library (all projects benefit) and the hardware log.
+- **B. Perceptual curve on the slider.** Map slider position to duty with a gamma-style curve (e.g. duty = min + (255 - min) * p^2.2), so equal slider steps look like equal brightness steps. Cheap; do it together with A. On its own it doesn't widen the range.
+- Only if A falls short: the hardware mod below.
+
 ## Backlight hardware mod *(community: joevial; untested)*
 For deeper dimming, joevial changes R12 from 5.1 Ω to 33 Ω, adds about 80 nF from FB to GND, and wires FB to GPIO2 for a second, coarse brightness channel (GPIO38 stays the fine one). See `reference/ESP32-4848S040-LVGL-LGFX/README.md`. This conflicts with relay 2 / audio LRCLK on GPIO2.

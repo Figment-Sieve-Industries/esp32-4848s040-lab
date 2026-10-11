@@ -1,5 +1,6 @@
 // G: Today's energy - self-powered ring, totals, export/import tiles, solar-by-hour bars.
 #include <Arduino.h>
+#include <math.h>
 #include <stdio.h>
 #include <time.h>
 #include "screens.h"
@@ -72,7 +73,7 @@ lv_obj_t *makeTile(lv_obj_t *parent, int x, Icon icon, const char *title, lv_obj
 int barTarget(const TodayStats &st, int i, float scale) {
     float v = st.valid ? st.hourlySolarKWh[i] : 0.0f;
     if (v <= 0.0f) return BAR_MIN_H;
-    int h = static_cast<int>(v / scale * BAR_MAX_H + 0.5f);
+    int h = static_cast<int>(lroundf(v / scale * BAR_MAX_H));
     if (h < BAR_MIN_H) h = BAR_MIN_H;
     if (h > BAR_MAX_H) h = BAR_MAX_H;
     return h;
@@ -90,7 +91,7 @@ bool barHasData(const TodayStats &st, int i) { return st.valid && st.hourlySolar
 
 int ringValue(const TodayStats &st) {
     if (!st.valid || st.selfPoweredPct < 0) return 0;
-    int v = static_cast<int>(st.selfPoweredPct + 0.5f);
+    int v = static_cast<int>(lroundf(st.selfPoweredPct));
     return v < 0 ? 0 : (v > 100 ? 100 : v);
 }
 

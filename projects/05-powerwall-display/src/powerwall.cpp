@@ -7,10 +7,12 @@
 //
 // Two tasks on core 0 (LVGL runs on core 1 and never touches the network):
 //  - gwTask polls the gateway every s_pollMs over ONE long-lived HTTPS connection (keep-alive).
-//  - wxTask fetches weather every 15 min with its own client and a pinned CA.
+//  - wxTask fetches weather every 15 min with its own client and a pinned CA, and the sky data
+//    (sky.cpp): aurora + Kp every 30 min, moonrise/moonset once a day.
 // s_tlsLock ensures only one TLS session exists at a time (mbedTLS needs ~40-50 KB internal RAM
 // per session): the weather task closes the gateway connection before opening its own.
 #include "powerwall.h"
+#include "sky.h"
 #include "ca_certs.h"
 #include "secrets.h"
 #include <ArduinoJson.h>
@@ -24,7 +26,11 @@ namespace {
 constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
 constexpr uint32_t READ_TIMEOUT_MS = 3000;
 constexpr uint32_t HANDSHAKE_TIMEOUT_S = 8; // default is 120 s, which would freeze polling
+constexpr uint32_t WEATHER_HANDSHAKE_TIMEOUT_S = 5;
+constexpr uint32_t WEATHER_READ_TIMEOUT_MS = 5000;
 constexpr uint32_t WEATHER_PERIOD_MS = 15 * 60 * 1000UL;
+constexpr uint32_t SKY_PERIOD_MS = 30 * 60 * 1000UL;   // aurora + Kp
+constexpr uint32_t SKY_RETRY_MS = 5 * 60 * 1000UL;     // after a failed sky fetch
 
 WiFiMulti s_wifiMulti;
 SemaphoreHandle_t s_lock;    // protects s_data / s_weather / s_net
@@ -41,10 +47,18 @@ HTTPClient s_gwHttp;
 String s_token;
 int s_loginFailures = 0;
 uint32_t s_nextLoginMs = 0;
+bool s_backingOff = false; // s_nextLoginMs is only meaningful while set (millis() wraps after ~49 days)
 
 void setError(const char *msg) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     strlcpy(s_data.error, msg, sizeof(s_data.error));
+    xSemaphoreGive(s_lock);
+}
+
+// Keeps a more specific message that is already showing
+void setErrorIfNone(const char *msg) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_data.error[0]) strlcpy(s_data.error, msg, sizeof(s_data.error));
     xSemaphoreGive(s_lock);
 }
 
@@ -70,7 +84,13 @@ void gwBegin(const char *path, bool http10 = false) {
 }
 
 bool login() {
-    if ((int32_t)(millis() - s_nextLoginMs) < 0) return false; // backing off
+    if (s_backingOff) {
+        if ((int32_t)(millis() - s_nextLoginMs) < 0) {
+            setErrorIfNone("login failed - retrying"); // no request made; don't leave the UI without a reason
+            return false;
+        }
+        s_backingOff = false; // back-off elapsed
+    }
     gwBegin("/api/login/Basic");
     s_gwHttp.addHeader("Content-Type", "application/json");
     JsonDocument req;
@@ -88,6 +108,7 @@ bool login() {
     if (code == 200 && !deserializeJson(res, resp) && res["token"].is<const char *>()) {
         s_token = res["token"].as<const char *>();
         s_loginFailures = 0;
+        s_backingOff = false;
         Serial.println("Powerwall: logged in");
         return true;
     }
@@ -96,6 +117,7 @@ bool login() {
     uint32_t backoff = 30000UL << (s_loginFailures > 4 ? 4 : s_loginFailures - 1);
     if (backoff > 300000UL) backoff = 300000UL;
     s_nextLoginMs = millis() + backoff;
+    s_backingOff = true;
     if (code == 401 || code == 403) setError("login rejected - check password");
     else if (code == 200) setError("login: bad response");
     else setHttpError("login", code);
@@ -156,23 +178,46 @@ bool pollOnce() {
         return false;
     }
 
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_data.siteW = agg["site"]["instant_power"] | 0.0f;
-    s_data.batteryW = agg["battery"]["instant_power"] | 0.0f;
-    s_data.loadW = agg["load"]["instant_power"] | 0.0f;
-    s_data.solarW = agg["solar"]["instant_power"] | 0.0f;
-    s_data.voltageV = agg["site"]["instant_average_voltage"] | 0.0f;
-    s_data.siteVar = agg["site"]["instant_reactive_power"] | 0.0f;
-    s_data.siteVA = agg["site"]["instant_apparent_power"] | 0.0f;
-    s_data.loadVar = agg["load"]["instant_reactive_power"] | 0.0f;
-    s_data.loadVA = agg["load"]["instant_apparent_power"] | 0.0f;
-    s_data.frequencyHz = agg["battery"]["frequency"] | 0.0f;
-    s_data.solarExportedWh = agg["solar"]["energy_exported"] | 0.0;
-    s_data.loadImportedWh = agg["load"]["energy_imported"] | 0.0;
-    s_data.siteExportedWh = agg["site"]["energy_exported"] | 0.0;
-    s_data.siteImportedWh = agg["site"]["energy_imported"] | 0.0;
-    s_data.battExportedWh = agg["battery"]["energy_exported"] | 0.0;
-    s_data.battImportedWh = agg["battery"]["energy_imported"] | 0.0;
+    // Parse everything into locals first; the shared state is only touched (briefly, under the
+    // lock) once the aggregates are known to be complete. A missing meter must not become "0".
+    JsonVariantConst root = agg.as<JsonVariantConst>();
+    bool complete = true;
+    auto req = [&](const char *meter, const char *key) -> double { // required numeric key
+        JsonVariantConst v = root[meter][key];
+        if (!v.is<double>()) {
+            complete = false;
+            return 0.0;
+        }
+        return v.as<double>();
+    };
+    PwData n; // only the aggregate fields are used
+    n.siteW = (float)req("site", "instant_power");
+    n.batteryW = (float)req("battery", "instant_power");
+    n.loadW = (float)req("load", "instant_power");
+    n.solarW = (float)req("solar", "instant_power");
+    n.solarExportedWh = req("solar", "energy_exported");
+    n.loadImportedWh = req("load", "energy_imported");
+    n.siteExportedWh = req("site", "energy_exported");
+    n.siteImportedWh = req("site", "energy_imported");
+    n.battExportedWh = req("battery", "energy_exported");
+    n.battImportedWh = req("battery", "energy_imported");
+    // energy.cpp needs solar and home counters > 0 (zero is how it detects a gateway counter reset)
+    if (n.solarExportedWh <= 0 || n.loadImportedWh <= 0) complete = false;
+    if (!complete) {
+        setError("aggregates: incomplete data"); // keep the last good data; it goes stale on screen
+        s_gwClient.stop();
+        return false;
+    }
+    // Optional: the gauges show "--" when these are 0
+    n.voltageV = root["site"]["instant_average_voltage"] | 0.0f;
+    n.siteVar = root["site"]["instant_reactive_power"] | 0.0f;
+    n.siteVA = root["site"]["instant_apparent_power"] | 0.0f;
+    n.loadVar = root["load"]["instant_reactive_power"] | 0.0f;
+    n.loadVA = root["load"]["instant_apparent_power"] | 0.0f;
+    n.frequencyHz = root["battery"]["frequency"] | 0.0f;
+
+    bool haveSoc = false, haveGrid = false, gridConnected = true, gridServices = false;
+    float soc = 0;
     if (codeSoe == 200 && soe["percentage"].is<float>()) {
         float raw = soe["percentage"].as<float>();
 #if PW_SOC_APP_SCALE
@@ -180,13 +225,40 @@ bool pollOnce() {
 #else
         float pct = raw;
 #endif
-        s_data.soc = pct < 0 ? 0 : pct > 100 ? 100 : pct;
-        s_data.socValid = true;
+        soc = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+        haveSoc = true;
     }
     if (codeGrid == 200) {
         const char *gs = grid["grid_status"] | "SystemGridConnected";
-        s_data.gridConnected = strcmp(gs, "SystemGridConnected") == 0;
-        s_data.gridServicesActive = grid["grid_services_active"] | false;
+        gridConnected = strcmp(gs, "SystemGridConnected") == 0;
+        gridServices = grid["grid_services_active"] | false;
+        haveGrid = true;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_data.siteW = n.siteW;
+    s_data.batteryW = n.batteryW;
+    s_data.loadW = n.loadW;
+    s_data.solarW = n.solarW;
+    s_data.voltageV = n.voltageV;
+    s_data.siteVar = n.siteVar;
+    s_data.siteVA = n.siteVA;
+    s_data.loadVar = n.loadVar;
+    s_data.loadVA = n.loadVA;
+    s_data.frequencyHz = n.frequencyHz;
+    s_data.solarExportedWh = n.solarExportedWh;
+    s_data.loadImportedWh = n.loadImportedWh;
+    s_data.siteExportedWh = n.siteExportedWh;
+    s_data.siteImportedWh = n.siteImportedWh;
+    s_data.battExportedWh = n.battExportedWh;
+    s_data.battImportedWh = n.battImportedWh;
+    if (haveSoc) {
+        s_data.soc = soc;
+        s_data.socValid = true;
+    }
+    if (haveGrid) {
+        s_data.gridConnected = gridConnected;
+        s_data.gridServicesActive = gridServices;
     }
     s_data.valid = true;
     s_data.updatedMs = millis();
@@ -201,18 +273,20 @@ bool fetchWeather() {
     char url[512];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-             "&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m"
+             "&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,cloud_cover"
              "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
              "&hourly=temperature_2m,weather_code,is_day&forecast_hours=11&forecast_days=1&timezone=auto",
              (double)WEATHER_LAT, (double)WEATHER_LON);
     WiFiClientSecure client;
     client.setCACert(OPEN_METEO_CA); // public internet: verify the server
-    client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
+    // This runs while holding s_tlsLock, so gateway polling pauses: keep the worst case bounded
+    // (connect 3 s + handshake 5 s + read 5 s) instead of the gateway's 8 s handshake / 8 s read.
+    client.setHandshakeTimeout(WEATHER_HANDSHAKE_TIMEOUT_S);
     HTTPClient http;
     http.begin(client, url);
     http.setReuse(false);
     http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-    http.setTimeout(8000);
+    http.setTimeout(WEATHER_READ_TIMEOUT_MS);
     int code = http.GET();
     String body = code == 200 ? http.getString() : String();
     http.end();
@@ -236,6 +310,7 @@ bool fetchWeather() {
     w.feelsC = doc["current"]["apparent_temperature"] | w.tempC;
     w.windKmh = doc["current"]["wind_speed_10m"] | 0.0f;
     w.rainPct = doc["daily"]["precipitation_probability_max"][0] | -1;
+    w.cloudPct = doc["current"]["cloud_cover"] | -1;
     // Hourly from the current hour: take every 2nd entry -> now, +2 ... +10 h
     JsonArray times = doc["hourly"]["time"];
     for (int i = 0; i < 6; i++) {
@@ -261,7 +336,7 @@ void updateNetStatus(bool up) {
     s_net.wifiUp = up;
     if (up) {
         strlcpy(s_net.ssid, WiFi.SSID().c_str(), sizeof(s_net.ssid));
-        s_net.rssi = WiFi.RSSI();
+        s_net.rssi = WiFi.RSSI(); // NOLINT(bugprone-signed-char-misuse): int8 dBm, sign extension intended
     }
     xSemaphoreGive(s_lock);
 }
@@ -299,21 +374,47 @@ void gwTask(void *) {
     }
 }
 
+// One scheduled job in wxTask: due when millis() reaches `next`.
+struct Job {
+    uint32_t next = 0;
+    bool due(uint32_t now) const { return (int32_t)(now - next) >= 0; }
+    void after(uint32_t now, uint32_t ms) { next = now + ms; }
+};
+
+// Run fn while holding the TLS lock, with the gateway's session closed first (gwTask is blocked on
+// the lock meanwhile, so it reconnects afterwards).
+template <typename F> bool withTls(F fn) {
+    xSemaphoreTake(s_tlsLock, portMAX_DELAY);
+    s_gwClient.stop();
+    bool ok = fn();
+    xSemaphoreGive(s_tlsLock);
+    return ok;
+}
+
 void wxTask(void *) {
-    uint32_t retryMs = 60000;
+    Job weather, aurora, kp, moon;
+    uint32_t weatherRetryMs = 60000;
     for (;;) {
         if (WiFi.status() != WL_CONNECTED || time(nullptr) < 1700000000) {
             vTaskDelay(pdMS_TO_TICKS(5000)); // wait for Wi-Fi and NTP (TLS cert validity needs the time)
             continue;
         }
-        xSemaphoreTake(s_tlsLock, portMAX_DELAY);
-        s_gwClient.stop(); // free the gateway's TLS session first (gwTask is blocked on the lock)
-        bool ok = fetchWeather();
-        xSemaphoreGive(s_tlsLock);
-        // 15 min when OK; on failure retry after 1, 2, 4 ... up to 15 min
-        uint32_t wait = ok ? WEATHER_PERIOD_MS : retryMs;
-        retryMs = ok ? 60000 : (retryMs * 2 > WEATHER_PERIOD_MS ? WEATHER_PERIOD_MS : retryMs * 2);
-        vTaskDelay(pdMS_TO_TICKS(wait));
+        uint32_t now = millis();
+        if (weather.due(now)) {
+            bool ok = withTls(fetchWeather);
+            // 15 min when OK; on failure retry after 1, 2, 4 ... up to 15 min
+            weather.after(millis(), ok ? WEATHER_PERIOD_MS : weatherRetryMs);
+            weatherRetryMs = ok ? 60000 : (weatherRetryMs * 2 > WEATHER_PERIOD_MS ? WEATHER_PERIOD_MS : weatherRetryMs * 2);
+        } else if (aurora.due(now)) {
+            aurora.after(millis(), skyFetchAurora() ? SKY_PERIOD_MS : SKY_RETRY_MS); // plain HTTP: no TLS lock
+        } else if (kp.due(now)) {
+            kp.after(millis(), withTls(skyFetchKp) ? SKY_PERIOD_MS : SKY_RETRY_MS);
+        } else if (moon.due(now) && skyMoonNeeded()) {
+            // Once per local day; checked again every 30 min (and after midnight)
+            moon.after(millis(), withTls(skyFetchMoon) ? SKY_PERIOD_MS : SKY_RETRY_MS);
+        }
+        // One job per pass, spaced out so the gateway polls in between TLS sessions
+        vTaskDelay(pdMS_TO_TICKS(3000));
     }
 }
 

@@ -19,10 +19,14 @@ struct FP {
 };
 
 // Icon parts must never swallow taps: the screen handles them (brightness tap).
-void inert(lv_obj_t *o) { lv_obj_remove_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE)); }
+void inert(lv_obj_t *o) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): LVGL flags are a bit-mask enum
+    lv_obj_remove_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+}
 
 lv_obj_t *polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float dy = 0) {
     auto *buf = (lv_point_precise_t *)lv_malloc(sizeof(lv_point_precise_t) * pts.size());
+    if (!buf) return nullptr; // out of LVGL heap: skip this stroke (callers tolerate null)
     int i = 0;
     for (auto p : pts) buf[i++] = {(lv_value_precise_t)((p.x + dx) * c.s), (lv_value_precise_t)((p.y + dy) * c.s)};
     lv_obj_t *l = lv_line_create(c.parent);
@@ -37,7 +41,9 @@ lv_obj_t *polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, fl
 }
 
 // Children flagged as "falling" (rain drops, snowflakes) are animated by iconAnimate()
-void markFalling(lv_obj_t *o) { lv_obj_add_flag(o, LV_OBJ_FLAG_USER_1); }
+void markFalling(lv_obj_t *o) {
+    if (o) lv_obj_add_flag(o, LV_OBJ_FLAG_USER_1);
+}
 
 // Arc of radius r around (cx, cy); angles in degrees, 0 = 3 o'clock, clockwise.
 void arc(const Ctx &c, float cx, float cy, float r, int a0, int a1) {

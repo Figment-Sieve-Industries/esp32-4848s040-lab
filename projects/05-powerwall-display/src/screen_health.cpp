@@ -8,7 +8,6 @@
 
 namespace {
 
-constexpr uint32_t STALE_MS = 10000;
 constexpr float IDLE_W = 30.0f;
 constexpr int BAR_W = 432;
 constexpr int BAR_H = 14;
@@ -99,7 +98,10 @@ void sheenExec(void *, int32_t v) { // v: 0..1000 permille of the travel
 }
 
 // Updates one voltage/frequency gauge.
-void gaugeUpdate(Gauge &g, bool stale, float v, float lo, float hi, const char *fmt) {
+// fmt is only ever a literal with one float conversion; the attribute (arg 0 = not checked against
+// the arguments) tells the compiler the non-literal format is deliberate.
+__attribute__((format(printf, 6, 0))) void gaugeUpdate(Gauge &g, bool stale, float v, float lo, float hi,
+                                                      const char *fmt) {
     if (stale || v <= 0) {
         ui::setText(g.value, "--");
         ui::setHidden(g.unit, true);
@@ -204,7 +206,7 @@ lv_obj_t *healthCreate() {
 
 void healthRefresh() {
     PwData d = powerwallData();
-    bool stale = !d.valid || millis() - d.updatedMs > STALE_MS;
+    bool stale = !d.valid || millis() - d.updatedMs > PW_STALE_MS;
     char buf[48];
     ui::topBarUpdate(topBar);
 

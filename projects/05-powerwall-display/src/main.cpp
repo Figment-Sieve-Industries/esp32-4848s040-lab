@@ -2,17 +2,19 @@
 // Live Tesla Powerwall 3 dashboard on the 4" panel, read from the gateway's local LAN API.
 // Network polling runs on core 0 (powerwall.cpp); LVGL runs in loop() on core 1.
 //
-// Screens (swipe left/right): B power flow, G today, H battery & grid, I weather.
-// Tap anywhere to cycle the backlight brightness.
+// Screens (swipe left/right): power flow, today, battery & grid, weather, moon, aurora, settings,
+// about (see ui::ScreenIndex).
 //
 // SCREEN_ROTATION: 0 = native, 1 = 90 deg clockwise, 2 = 180, 3 = 90 deg counter-clockwise.
 // 3 puts the USB-C port at the bottom. Touch is rotated to match.
 //
-// Nothing is written to flash at runtime: today's totals live in RTC memory (energy.cpp).
+// Nothing is written to flash at runtime: today's totals live in RTC memory (energy.cpp), backed up
+// with the minute log and settings on the SD card (history.cpp).
 #include <Arduino.h>
 #include <Board4848S040.h>
 #include <Board4848S040_lvgl.h>
 #include "energy.h"
+#include "history.h"
 #include "powerwall.h"
 #include "screens.h"
 #include "ui_common.h"
@@ -36,7 +38,12 @@ static ScreenDef screens[ui::SCREEN_COUNT] = {
     {todayCreate, todayRefresh, todayOnShow, nullptr},
     {healthCreate, healthRefresh, healthOnShow, nullptr},
     {weatherCreate, weatherRefresh, weatherOnShow, nullptr},
+    {moonCreate, moonRefresh, moonOnShow, nullptr},
+    {auroraCreate, auroraRefresh, auroraOnShow, nullptr},
+    {settingsCreate, settingsRefresh, settingsOnShow, nullptr},
+    {aboutCreate, aboutRefresh, nullptr, nullptr},
 };
+static_assert(sizeof(screens) / sizeof(screens[0]) == ui::SCREEN_COUNT, "one entry per screen, in ScreenIndex order");
 static int current = 0;
 
 // ---- navigation hooks (called from ui_common.cpp) ----
@@ -52,11 +59,8 @@ void navSwipe(int direction) {
     if (screens[current].onShow) screens[current].onShow();
 }
 
-static uint8_t brightness = 255;
-void navTap() {
-    brightness = brightness == 255 ? 160 : brightness == 160 ? 100 : 255;
-    board4848::setBacklight(brightness);
-}
+// Brightness lives on the settings screen now; a tap does nothing.
+void navTap() {}
 
 static void refreshCb(lv_timer_t *) {
     energyUpdate(powerwallData()); // always, so today's totals keep counting
@@ -79,7 +83,10 @@ void setup() {
     gfx = board4848::initDisplay(SCREEN_ROTATION);
     if (!gfx) halt("Display init failed (PSRAM missing? check memory_type = qio_opi)");
     gfx->fillScreen(RGB565_BLACK);
-    board4848::setBacklight(255);
+    board4848::setBacklight(settingsGet().brightness); // default until the card's settings are read
+
+    // After initDisplay(): the SD card shares the LCD init-bus pins. Mounts in the background.
+    historyStart();
 
     bool hasTouch = touch.begin();
     touch.setRotation(SCREEN_ROTATION);
@@ -124,5 +131,12 @@ void loop() {
                       (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)gwStack,
                       (unsigned long)wxStack);
+        lv_mem_monitor_t lm;
+        lv_mem_monitor(&lm);
+        SdStatus sd = historyStatus();
+        Serial.printf("  lvgl pool: %u%% used, %lu free, largest %lu | sd %s %lu MHz, %lu lines, io err %lu\n",
+                      (unsigned)lm.used_pct, (unsigned long)lm.free_size, (unsigned long)lm.free_biggest_size,
+                      sd.mounted ? "ok" : "none", (unsigned long)sd.clockMHz, (unsigned long)sd.linesToday,
+                      (unsigned long)sd.ioErrors);
     }
 }
