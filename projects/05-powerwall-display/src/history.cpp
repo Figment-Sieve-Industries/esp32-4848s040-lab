@@ -4,9 +4,11 @@
 #include "history.h"
 
 #include <Board4848S040.h>
+#include <atomic>
 #include <SD.h>
 #include <sd_store.h>
 
+#include "cache.h"
 #include "day_history.h"
 #include "powerwall.h"
 #include "shared_state.h"
@@ -41,6 +43,10 @@ SdStatus s_status;
 AppSettings s_settings;
 bool s_settingsLoaded = false;   // read from a card (or none found) since boot
 bool s_settingsDirty = false;
+bool s_touchedBrightness = false; // changed by the user before the card was read: wins over the file
+bool s_touchedMask = false;
+TaskHandle_t s_sdTask = nullptr;
+std::atomic<bool> s_cacheStatusReq{false}; // serial `c`: list the cache from the SD task, not the UI thread
 uint32_t s_settingsChangedMs = 0;
 uint8_t s_baseline[BASELINE_MAX];
 size_t s_baselineLen = 0;
@@ -67,17 +73,23 @@ void loadSettings() {
     SettingsFile f;
     memset(&f, 0, sizeof(f));
     setcodec::Decoded d;
+    bool takeBrightness = false;
     // Wrong size, unknown magic or an out-of-range value all fall back to the defaults.
     bool ok = sdcard::readAtomic(SETTINGS_PATH, &f, sizeof(f)) &&
               setcodec::decodeSettings(f.magic, f.value, f.screenMask, B4848_LCD_BL_MIN, d);
     {
         LockGuard g(s_lock);
         s_settingsLoaded = true;
-        if (!ok || s_settingsDirty) return; // keep defaults, or a change made before the card was read
-        s_settings.brightnessPct = static_cast<uint8_t>(d.brightnessPct);
-        s_settings.screenMask = d.screenMask;
+        if (!ok) return; // keep defaults (and any change made before the card was read)
+        // A field the user already changed keeps its new value; the other one comes from the card. The
+        // merged record is saved again (s_settingsDirty is already set by the change).
+        if (!s_touchedBrightness) s_settings.brightnessPct = static_cast<uint8_t>(d.brightnessPct);
+        if (!s_touchedMask) s_settings.screenMask = d.screenMask;
+        d.brightnessPct = s_settings.brightnessPct;
+        d.screenMask = s_settings.screenMask;
+        takeBrightness = !s_touchedBrightness;
     }
-    applyBacklight(d.brightnessPct);
+    if (takeBrightness) applyBacklight(d.brightnessPct);
     Serial.printf("SD: settings loaded (%s, brightness %d%%, screens 0x%03x)\n",
                   f.magic == setcodec::SETTINGS_MAGIC_V3   ? "v3"
                   : f.magic == blcurve::SETTINGS_MAGIC_V2 ? "v2"
@@ -226,6 +238,7 @@ void sdTask(void *) {
             }
         }
         sampleMinute();
+        if (s_cacheStatusReq.exchange(false)) cache::printStatus();
         dayhist::dayHistorySdTick(mounted); // history screen: saves due day records, serves reads
         if (mounted) {
             saveBaselineIfDirty();
@@ -246,8 +259,12 @@ void sdTask(void *) {
 void historyStart() {
     s_started = true;
     // Idle priority like the network tasks; 6 KB covers FatFs path handling and snprintf.
-    xTaskCreatePinnedToCore(sdTask, "sd", 6144, nullptr, tskIDLE_PRIORITY, nullptr, 0);
+    xTaskCreatePinnedToCore(sdTask, "sd", 6144, nullptr, tskIDLE_PRIORITY, &s_sdTask, 0);
 }
+
+void historyRequestCacheStatus() { s_cacheStatusReq.store(true); }
+
+uint32_t historyTaskStackFree() { return s_sdTask ? uxTaskGetStackHighWaterMark(s_sdTask) : 0; }
 
 SdStatus historyStatus() {
     LockGuard g(s_lock);
@@ -286,6 +303,7 @@ void settingsSetBrightness(int pct) {
     applyBacklight(pct);
     LockGuard g(s_lock);
     s_settings.brightnessPct = static_cast<uint8_t>(pct);
+    s_touchedBrightness = true;
     s_settingsDirty = true;
     s_settingsChangedMs = millis();
 }
@@ -295,6 +313,7 @@ void settingsSetScreenEnabled(int screenIndex, bool on) {
     const uint16_t m = setcodec::withScreen(s_settings.screenMask, screenIndex, on);
     if (m == s_settings.screenMask) return;
     s_settings.screenMask = m;
+    s_touchedMask = true;
     s_settingsDirty = true;
     s_settingsChangedMs = millis();
 }

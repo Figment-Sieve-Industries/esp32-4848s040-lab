@@ -133,6 +133,7 @@ lv_obj_t *healthCreate() {
     lv_anim_set_values(&a, 0, 1000);
     lv_anim_set_duration(&a, 3000);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    ui::animTag(&a);
     lv_anim_start(&a);
 
     // Cards

@@ -71,6 +71,10 @@ void animFadeIn(lv_obj_t *obj, uint32_t delayMs);            // opa 0 -> 255 ove
 // Animate an int value from -> to over ms (after delay) calling cb(var, v); used for ring sweeps
 // and bars growing.
 void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint32_t ms, uint32_t delayMs);
+// Marks an app animation (call before lv_anim_start in every place the app starts one whose var is an
+// lv_obj_t). pauseScreenAnimations only touches marked animations: LVGL's own style transitions use a
+// different var type (trans_t*), which must never be read as an object.
+void animTag(lv_anim_t *a);
 
 // Pause (true) or resume (false) every running animation whose var is `screen` or any of its
 // descendants. Call with pause = true for the screen being left, false for the one shown.

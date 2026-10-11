@@ -36,7 +36,8 @@
 //   m          print the memory / heap line now
 //   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
 //   v <0|1>    privacy mode for screenshots: placeholder Wi-Fi name and town (not saved)
-//   c          list the SD cache records (name, size, version, age)
+//   c          list the SD cache records (name, size, version, age); printed by the SD task shortly after the reply
+//   k          diag: restart the RGB scan-out at the next VSYNC (panel drift recovery)
 //   r          reboot (ESP.restart; RTC data and the system clock survive)
 //   h          help
 #include <Arduino.h>
@@ -158,7 +159,10 @@ static void gotoScreen(int next, int direction) {
 }
 
 // Called from ui_common.cpp's gesture handler
-void navSwipe(int direction) { gotoScreen(setcodec::nextScreen(current, direction, syncScreenMask()), direction); }
+void navSwipe(int direction) {
+    const uint16_t mask = syncScreenMask(); // first: it may change `current` (argument evaluation order is unspecified)
+    gotoScreen(setcodec::nextScreen(current, direction, mask), direction);
+}
 
 extern volatile uint8_t g_netPhase; // DIAG stutter: 0 idle, 1 gateway poll, 2 background job
 
@@ -311,14 +315,15 @@ static void cmdEnable(const char *arg) {
 static void cmdMem() {
     lv_mem_monitor_t lm;
     lv_mem_monitor(&lm);
-    char msg[220];
+    char msg[280];
     snprintf(msg, sizeof(msg),
-             "mem: internal free %lu, largest block %lu, min ever %lu | stack free net %lu lvgl %lu | lvgl pool %u%% "
+             "mem: internal free %lu, largest block %lu, min ever %lu | stack free net %lu lvgl %lu sd %lu | lvgl pool %u%% "
              "used, %lu free, largest %lu | psram free %lu #ok",
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
              (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)netTaskStackFree(),
-             (unsigned long)uxTaskGetStackHighWaterMark(nullptr), (unsigned)lm.used_pct, (unsigned long)lm.free_size,
+             (unsigned long)uxTaskGetStackHighWaterMark(nullptr), (unsigned long)historyTaskStackFree(),
+             (unsigned)lm.used_pct, (unsigned long)lm.free_size,
              (unsigned long)lm.free_biggest_size, (unsigned long)ESP.getFreePsram());
     cmdReply(msg);
 }
@@ -600,8 +605,8 @@ static void handleCommand(char *line) {
             }
             break;
         case 'c':
-            cache::printStatus();
-            cmdReply("cache #ok");
+            historyRequestCacheStatus(); // SD task prints it: no card I/O on the LVGL thread
+            cmdReply("cache listing requested #ok");
             break;
         case 'r':
             cmdReply("rebooting #ok");
@@ -611,7 +616,7 @@ static void handleCommand(char *line) {
             break;
         case 'h':
             cmdReply("commands: s <0..10> go to screen | n next | p previous | l list (- = disabled) | e [<n> <0|1>] enable/disable screen | b <0-255> backlight | bf <hz> | bd <duty> | br | "
-                     "bs [steps ms from to] | y [d|w|m|-|+] history | m memory | x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
+                     "bs [steps ms from to] | y [d|w|m|-|+] history | m memory | x screenshot | v <0|1> privacy | c cache | k restart RGB scan-out (diag) | r reboot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");
@@ -737,11 +742,11 @@ void loop() {
                       d.gridConnected ? "on-grid" : "OFF-GRID", d.error, t.solarKWh, t.homeKWh, current, frames / 10.0f,
                       (unsigned long)maxGap);
         // Long-uptime health: fragmentation shows as a shrinking largest block
-        Serial.printf("  mem: internal free %lu, largest block %lu, min ever %lu | stack free net %lu lvgl %lu\n",
+        Serial.printf("  mem: internal free %lu, largest block %lu, min ever %lu | stack free net %lu lvgl %lu sd %lu\n",
                       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                       (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)netStack,
-                      (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
+                      (unsigned long)uxTaskGetStackHighWaterMark(nullptr), (unsigned long)historyTaskStackFree());
         lv_mem_monitor_t lm;
         lv_mem_monitor(&lm);
         SdStatus sd = historyStatus();
