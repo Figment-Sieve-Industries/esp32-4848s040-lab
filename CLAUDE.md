@@ -2,15 +2,38 @@
 
 Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 4" 480×480 ST7701S RGB panel, GT911 touch, CH340C USB-UART, microSD, NS4168 amp, Li-ion charger, optional relays. The repo is public (MIT, see LICENSE): code copied from reference/ or elsewhere keeps its own licence and must be credited in docs/guide/99-sources-and-credits.md. Never commit secrets, personal data or flash backups.
 
+## Development guide: read it first, keep it current
+`docs/guide/` is the first-party reference for developing and debugging on this board. It records measured, hard-won findings; base new work on it rather than re-deriving or guessing.
+
+| Before you... | Read |
+|---|---|
+| start a new project or port to another board | [05 new-project checklist](docs/guide/05-new-project-checklist.md) |
+| debug anything (reboot, stutter, crackle, RAM, network, SD, tooling) | the symptom table in [02 debugging playbook](docs/guide/02-debugging-playbook.md), then [01 quirks](docs/guide/01-quirks-and-gotchas.md) for a known cause |
+| change architecture, memory, display, network or storage code | [04 patterns and decisions](docs/guide/04-patterns-and-decisions.md) (ADRs with the reasoning) |
+| revisit something already tried | [03 investigations](docs/guide/03-investigations.md) (what was tried, before/after numbers, rejected ideas) |
+| buy hardware or credit a source | [06 hardware and sourcing](docs/guide/06-hardware-and-sourcing.md), [99 sources and credits](docs/guide/99-sources-and-credits.md) |
+
+Updating the guide is part of finishing a task, not optional:
+- A new quirk or gotcha gets a Q-ID entry in 01 (symptom, root cause, fix, evidence, applies-to).
+- A debugging session gets an `inv-` section in 03 with hypotheses, every attempt in order, a before/after table of real measurements (from logs, not memory) and the fixing commit. Mark anything inferred as "(inferred)".
+- A new or improved debugging method gets a D-ID in 02. A design decision or reversal gets an ADR in 04.
+- Keep cross-links valid (anchors `inv-<slug>`, Q-/D-IDs) and the index tables at the top of each chapter in step.
+- Hardware results also go in `docs/hardware-log.md`; new projects in `projects/README.md` and the README projects table.
+
+Testing on hardware (project 05 pattern, reuse it in new projects): serial commands (`s n p l b m x v c r h`, see the top of `projects/05-powerwall-display/src/main.cpp`), screenshots with `projects/05-powerwall-display/tools-dev/screendump.py COM9 out --all --privacy` (look at every screen after UI changes), timestamped soak logs, `addr2line` for backtraces, host tests in `projects/05-powerwall-display/hosttest/run.ps1`. Details and pitfalls (CH340 reset on port open, concurrent pio runs): guide chapter 02.
+
+Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits only as `Paul <paul@wibjibit.com>`. Never commit secrets, flash backups, serial/soak logs (they contain the home SSID), local paths, private claude.ai links, the home town or coordinates; screenshots only in privacy mode (`v 1`). CI builds every project and runs the host tests on each push.
+
 ## Layout
-- `README.md`: master index
-- `docs/`: hardware docs 01–08, `datasheets/`, `vendor/` (schematic, IO sheet), `images/`
+- `README.md`: master index (projects table with the Powerwall 3 display featured, screenshots, where to buy)
+- `docs/guide/`: the development guide (above). `docs/`: hardware and research docs 01–12, `hardware-log.md`, `datasheets/`, `vendor/` (schematic, IO sheet), `images/` (incl. `images/screens/`)
 - `common/lib/Board4848S040/`: shared board library (pins, display, touch, LVGL glue)
 - `common/platformio-base.ini`: shared PlatformIO env `[base_4848s040]`
 - `common/boards/`: rzeldent board JSONs (CIY1/CIY3)
 - `projects/NN-name/`: one PlatformIO project each. The index is `projects/README.md`.
 - `reference/`: prior-art git submodules (read-only)
-- `tools/`: PowerShell helpers. `firmware/`: flash backups and vendor images.
+- `tools/`: PowerShell helpers. `firmware/`: vendor image notes; local flash backups (git-ignored).
+- `.github/workflows/ci.yml`: CI (build all projects, host tests).
 
 ## Hard rules
 - **Run pio and esptool from PowerShell, never Git Bash.** MSYS breaks ESP's `idf_tools.py` install. Use `tools/pio.ps1 <project> [build|upload|monitor|all] [-Port COMx]`.
@@ -56,6 +79,5 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - Fonts: built-in Montserrat only has ASCII + the degree sign; there is no middle dot, so use "/".
 - Shared modules: `net_http` (every background fetch: `net::Session`, own de-chunker, deadlines, per-job budget), `shared_state.h` (`Mutex`/`Shared<T>`/`isStale`), `mem_util.h` (PSRAM buffers, `psramJson()`), `time_util` (dates, `tu::clockValid`), `ui_common` helpers + `ui_chart` (`BarChart`: one object per bar strip). Host tests: `hosttest/run.ps1`.
 - Testing on hardware: serial commands `s <n>` / `n` / `p` / `l` / `b` / `m` / `x` (see main.cpp). `tools-dev/screendump.py COM9 out --all` screenshots every screen to PNG (opens the port without resetting the board). Use it to check layouts after UI changes.
-- Editing tip: Python heredocs in Git Bash turned `
-` inside C strings into real newlines more than once. For C/C++ string edits use the Edit tool.
+- Editing tip: shell heredocs and sed in the Bash tool turn `\n` inside C strings into real newlines (doubling it to `\\n` doesn't help: the backslashes collapse too). Edit C/C++ and any file containing `\n` with the Edit/Write tools, or write a script file with Write and run it. See guide Q-TOOL-02.
 - Sub-agents: the user wants parallel sub-agents where possible, with model/effort matched to the task (e.g. Sonnet medium for well-specified screen files). Write the shared headers/contracts first; agents build with a separate `PLATFORMIO_BUILD_DIR` to avoid collisions.
