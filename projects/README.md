@@ -29,7 +29,6 @@ Numbers are assigned when a project starts.
 | 05: history charts | Day / week / month charts from the SD minute log. |
 | 05: VPP test toggle | A way to exercise the VPP-active display state without a real event. |
 | 05: TEDAPI (optional) | Backup reserve and operation mode, which the customer-login local API does not expose. |
-| 05: design N free slot | Use the free left slot in design board N (private design canvas) for a new tile. |
 | 05: main-screen redraw load | Wi-Fi label throttle done (2026-10-11: the label is in 4 of 36 slow frames in a 10-min soak). The remaining ~150 ms frames are ~80 small areas: power-flow labels plus the moving chevrons (each invalidated twice), worst when all four flows are active. Options: fewer chevron invalidations, label updates spread over frames. See guide 03 `inv-stutter-rotated-flush`. |
 | Backlight range | The 05 brightness slider barely changes the backlight. Plan: (A) lower the PWM from 100 kHz to ~20-25 kHz after a serial-driven sweep with someone watching/listening, then re-measure the minimum; (B) gamma curve on the slider. Details: [docs/02-pinout.md](../docs/02-pinout.md#backlight-dimming-range-planned-not-yet-done). |
 | LovyanGFX alternative | Port the shared lib to LovyanGFX (`Panel_ST7701_guition_esp32_4848S040`, see `reference/ESP32-4848S040-LVGL-LGFX`) and compare speed |
