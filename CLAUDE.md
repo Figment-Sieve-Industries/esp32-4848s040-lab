@@ -36,7 +36,7 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
   - `begin()` probes GT911 at 0x5D/0x14 and checks the product ID "911"
   - `read(points, max)` returns `-1` for no new data, `0` for released, or `n` points
   - `setRotation(r)` matches the display rotation
-- `lv_display_t *lvglBegin(gfx, touch)` (`Board4848S040_lvgl.h`): LVGL 9 display + pointer indev, partial buffer in internal RAM
+- `lv_display_t *lvglBegin(gfx, touch)` (`Board4848S040_lvgl.h`): LVGL 9 display + pointer indev, partial buffer in internal RAM. With rotation 3 its flush writes the framebuffer itself (row segments + exact cache write-back); Arduino_GFX's rotated draw was ~2x slower (docs/hardware-log.md)
 
 ## SD card (`common/lib/SdStore` + patched `common/lib/SD`)
 - Add both to `lib_deps` (`symlink://../../common/lib/SD`, `symlink://../../common/lib/SdStore`). The patched `SD` replaces the core's: upstream 3.2.1 fails multi-block writes intermittently (see `common/lib/SD/README-mini-screen.md`).
@@ -54,6 +54,8 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - **The user does not want internal-flash writes at runtime** (wear). Use RTC memory now; an SD card later.
 - Memory: LVGL heap = 1 MB PSRAM pool (`LV_MEM_POOL_ALLOC`). No `LV_ATTRIBUTE_FAST_MEM`. mbedTLS allocations of 1 KB+ go to PSRAM (`mbedtls_platform_set_calloc_free` in `powerwall.cpp`); every `JsonDocument` uses `psramJson()` (`psram_json.h`). `WiFi.persistent(false)`: no NVS writes. Keep ~100 KB+ internal free; the serial heartbeat and `[tls]` lines show the low-water mark.
 - Fonts: built-in Montserrat only has ASCII + the degree sign; there is no middle dot, so use "/".
+- Shared modules: `net_http` (every background fetch: `net::Session`, own de-chunker, deadlines, per-job budget), `shared_state.h` (`Mutex`/`Shared<T>`/`isStale`), `mem_util.h` (PSRAM buffers, `psramJson()`), `time_util` (dates, `tu::clockValid`), `ui_common` helpers + `ui_chart` (`BarChart`: one object per bar strip). Host tests: `hosttest/run.ps1`.
+- Testing on hardware: serial commands `s <n>` / `n` / `p` / `l` / `b` / `m` / `x` (see main.cpp). `tools-dev/screendump.py COM9 out --all` screenshots every screen to PNG (opens the port without resetting the board). Use it to check layouts after UI changes.
 - Editing tip: Python heredocs in Git Bash turned `
 ` inside C strings into real newlines more than once. For C/C++ string edits use the Edit tool.
 - Sub-agents: the user wants parallel sub-agents where possible, with model/effort matched to the task (e.g. Sonnet medium for well-specified screen files). Write the shared headers/contracts first; agents build with a separate `PLATFORMIO_BUILD_DIR` to avoid collisions.
