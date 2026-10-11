@@ -342,6 +342,7 @@ lv_obj_t *ensoCreate() {
     s_syn = ui::label(s_banner, &lv_font_montserrat_12, ui::MUTED, "");
     lv_obj_set_width(s_syn, 350);
     lv_label_set_long_mode(s_syn, LV_LABEL_LONG_SCROLL_CIRCULAR); // CPC synopsis, ~160 chars
+    lv_obj_set_style_anim_duration(s_syn, lv_anim_speed(20), 0);  // px/s; LVGL's default 40 is hard to read
     lv_obj_set_pos(s_syn, 60, 52);
 
     // ---- Weekly Nino 3.4 ----

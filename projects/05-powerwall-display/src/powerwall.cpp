@@ -24,6 +24,8 @@
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
 
+volatile uint8_t g_netPhase; // DIAG stutter
+
 namespace {
 
 constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
@@ -419,21 +421,26 @@ void netTask(void *) {
         updateNetStatus(true);
 
         uint32_t start = millis();
+        g_netPhase = 1; // DIAG
         pollOnce();
+        g_netPhase = 2;
         // Background jobs need NTP time: TLS certificate validity is checked against it
         if (time(nullptr) >= 1700000000) runOneJob();
+        g_netPhase = 0;
         uint32_t spent = millis() - start;
         vTaskDelay(pdMS_TO_TICKS(spent < s_pollMs ? s_pollMs - spent : 100));
     }
 }
 
-// mbedTLS allocator: blocks of 1 KB and up (record buffers, certificates, big numbers) go to PSRAM,
-// small ones stay internal for speed; either falls back to the other. The core's default forces
-// everything internal (~40-50 KB per session), which was the internal-RAM low point.
+// mbedTLS allocator: blocks of 4 KB and up (mainly the two 16 KB record buffers) go to PSRAM; the
+// handshake's many small big-number/certificate blocks stay internal. Either falls back to the
+// other. The core's default forces everything internal (~40-50 KB per session), which was the
+// internal-RAM low point; a 1 KB threshold sent the per-poll handshake maths through PSRAM too,
+// and the PSRAM traffic made the RGB panel crackle.
 void *tlsCalloc(size_t n, size_t size) {
     if (size && n > SIZE_MAX / size) return nullptr;
     const uint32_t ext = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, in = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    bool big = n * size >= 1024;
+    bool big = n * size >= 4096;
     void *p = heap_caps_calloc(n, size, big ? ext : in);
     return p ? p : heap_caps_calloc(n, size, big ? in : ext);
 }
