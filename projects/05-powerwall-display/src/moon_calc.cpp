@@ -206,8 +206,6 @@ const char *fullMoonName(long q, double fullUnix) {
 
 }  // namespace
 
-const char *moonOctantName(int octant) { return kOctantNames[octant & 7]; }
-
 MoonPhase moonPhase(time_t utc) {
     MoonPhase r;
     const double t = (double)utc;
