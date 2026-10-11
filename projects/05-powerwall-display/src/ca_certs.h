@@ -1,8 +1,11 @@
 #pragma once
-// Root CAs for api.open-meteo.com (Let's Encrypt): ISRG Root X1 (expires 2035) and
-// ISRG Root YR (expires 2045). Open-Meteo currently chains YR1 -> Root YR (cross-signed by X1).
+// Pinned root CAs for the background fetches (net::Options::ca). inline constexpr: one copy in the
+// image however many files include this.
+
+// Let's Encrypt: ISRG Root X1 (expires 2035) and ISRG Root YR (expires 2045). Used for api.open-meteo.com
+// (powerwall.cpp, chains YR1 -> Root YR, cross-signed by X1) and soho.nascom.nasa.gov (sun image, space.cpp).
 // Fetched from letsencrypt.org/certs on 2026-10-10.
-static const char OPEN_METEO_CA[] =
+inline constexpr char LETS_ENCRYPT_CA[] =
     "-----BEGIN CERTIFICATE-----\n"
     "MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw\n"
     "TzELMAkGA1UEBhMCVVMxKTAnBgNVBAoTIEludGVybmV0IFNlY3VyaXR5IFJlc2Vh\n"
@@ -65,10 +68,10 @@ static const char OPEN_METEO_CA[] =
     "sI1ANRYvqSFC2X1VRZfDg+wD6E21BccmifG4yWc=\n"
     "-----END CERTIFICATE-----\n";
 
-// Root CAs for the moon/aurora sources (sky.cpp), fetched 2026-10-11:
-// services.swpc.noaa.gov (NOAA Kp): Amazon Root CA 1, expires 2038
+// Fetched 2026-10-11:
+// services.swpc.noaa.gov (Kp in sky.cpp, space weather in space.cpp): Amazon Root CA 1, expires 2038
 //   (sha256 8E:CD:E6:88:4F:3D:87:B1:12:5B:A3:1A:C3:FC:B1:3D:70:16:DE:7F:57:CC:90:4F:E1:CB:97:C6:AE:98:19:6E)
-static const char NOAA_CA[] =
+inline constexpr char NOAA_CA[] =
     "-----BEGIN CERTIFICATE-----\n"
     "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
     "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDExBBbWF6\n"
@@ -92,7 +95,7 @@ static const char NOAA_CA[] =
 
 // api.met.no (moonrise/moonset): HARICA TLS RSA Root CA 2021, expires 2045
 //   (sha256 D9:5D:0E:8E:DA:79:52:5B:F9:BE:B1:1B:14:D2:10:0D:32:94:98:5F:0C:62:D9:FA:BD:9C:D9:99:EC:CB:7B:1D)
-static const char MET_NO_CA[] =
+inline constexpr char MET_NO_CA[] =
     "-----BEGIN CERTIFICATE-----\n"
     "MIIFpDCCA4ygAwIBAgIQOcqTHO9D88aOk8f0ZIk4fjANBgkqhkiG9w0BAQsFADBs\n"
     "MQswCQYDVQQGEwJHUjE3MDUGA1UECgwuSGVsbGVuaWMgQWNhZGVtaWMgYW5kIFJl\n"
@@ -129,7 +132,7 @@ static const char MET_NO_CA[] =
 
 // www.cpc.ncep.noaa.gov (ENSO, enso.cpp): Go Daddy Root Certificate Authority - G2, expires 2037, fetched 2026-10-11
 //   (sha256 45:14:0B:32:47:EB:9C:C8:C5:B4:F0:D7:B5:30:91:F7:32:92:08:9E:6E:5A:63:E2:74:9D:D3:AC:A9:19:8E:DA)
-static const char CPC_CA[] =
+inline constexpr char CPC_CA[] =
     "-----BEGIN CERTIFICATE-----\n"
     "MIIDxTCCAq2gAwIBAgIBADANBgkqhkiG9w0BAQsFADCBgzELMAkGA1UEBhMCVVMx\n"
     "EDAOBgNVBAgTB0FyaXpvbmExEzARBgNVBAcTClNjb3R0c2RhbGUxGjAYBgNVBAoT\n"
@@ -154,4 +157,5 @@ static const char CPC_CA[] =
     "4uJEvlz36hz1\n"
     "-----END CERTIFICATE-----\n";
 
-// soho.nascom.nasa.gov (sun image, space.cpp) is Let's Encrypt too: use OPEN_METEO_CA (ISRG X1 + YR).
+// Old name, kept until the integration pass removes it (setCACert takes a const char *).
+inline constexpr const char *OPEN_METEO_CA = LETS_ENCRYPT_CA;

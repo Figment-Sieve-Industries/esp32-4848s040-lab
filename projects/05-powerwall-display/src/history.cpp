@@ -5,11 +5,11 @@
 
 #include <Board4848S040.h>
 #include <SD.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
 #include <sd_store.h>
 
 #include "powerwall.h"
+#include "shared_state.h"
+#include "time_util.h"
 
 namespace {
 
@@ -29,7 +29,8 @@ struct SettingsFile {
     AppSettings s;
 };
 
-SemaphoreHandle_t s_lock;
+Mutex s_lock; // static init: the getters work (defaults) before historyStart()
+bool s_started = false;
 SdStatus s_status;
 AppSettings s_settings;
 bool s_settingsLoaded = false;   // read from a card (or none found) since boot
@@ -51,17 +52,12 @@ struct MinuteAcc {
     bool gridDown = false;       // any off-grid reading in the minute
 } s_acc;
 
-struct Guard {
-    Guard() { xSemaphoreTake(s_lock, portMAX_DELAY); }
-    ~Guard() { xSemaphoreGive(s_lock); }
-};
-
 void loadSettings() {
     SettingsFile f;
     bool ok = sdcard::readAtomic(SETTINGS_PATH, &f, sizeof(f)) && f.magic == SETTINGS_MAGIC;
     uint8_t level;
     {
-        Guard g;
+        LockGuard g(s_lock);
         s_settingsLoaded = true;
         if (!ok || s_settingsDirty) return; // keep defaults, or a change made before the card was read
         if (f.s.brightness < B4848_LCD_BL_MIN) f.s.brightness = B4848_LCD_BL_MIN;
@@ -75,14 +71,14 @@ void loadSettings() {
 void saveSettingsIfDue() {
     SettingsFile f;
     {
-        Guard g;
+        LockGuard g(s_lock);
         if (!s_settingsDirty || millis() - s_settingsChangedMs < SETTINGS_SETTLE_MS) return;
         s_settingsDirty = false;
         f.magic = SETTINGS_MAGIC;
         f.s = s_settings;
     }
     if (!sdcard::mkdirs(DIR) || !sdcard::writeAtomic(SETTINGS_PATH, &f, sizeof(f))) {
-        Guard g;
+        LockGuard g(s_lock);
         s_settingsDirty = true; // retry next round (e.g. no card yet)
     }
 }
@@ -91,14 +87,14 @@ void saveBaselineIfDirty() {
     uint8_t copy[BASELINE_MAX];
     size_t len;
     {
-        Guard g;
+        LockGuard g(s_lock);
         if (!s_baselineDirty) return;
         len = s_baselineLen;
         memcpy(copy, s_baseline, len);
         s_baselineDirty = false;
     }
     bool ok = sdcard::mkdirs(DIR) && sdcard::writeAtomic(BASELINE_PATH, copy, len);
-    Guard g;
+    LockGuard g(s_lock);
     if (ok) s_status.baselineSaved = true;
     else s_baselineDirty = true; // retry next round (with a newer copy if one arrived meanwhile)
 }
@@ -128,7 +124,7 @@ void flushMinute() {
         if (!exists) ok = sdcard::appendLine(path, CSV_HEADER);
     }
     ok = ok && sdcard::appendLine(path, line);
-    Guard g;
+    LockGuard g(s_lock);
     if (strcmp(s_status.logFile, path) != 0) {
         strlcpy(s_status.logFile, path, sizeof(s_status.logFile));
         s_status.linesToday = 0;
@@ -143,9 +139,9 @@ void flushMinute() {
 // Fold the latest gateway reading into the current minute; flush when the minute changes.
 void sampleMinute() {
     time_t now = time(nullptr);
+    if (!tu::clockValid(now)) return; // clock not synced yet
     struct tm tm;
     localtime_r(&now, &tm);
-    if (tm.tm_year < 124) return; // clock not synced yet
     int key = tm.tm_yday * 1440 + tm.tm_hour * 60 + tm.tm_min;
     if (key != s_acc.minuteKey) {
         flushMinute();
@@ -154,7 +150,7 @@ void sampleMinute() {
         s_acc.tm = tm;
     }
     PwData d = powerwallData();
-    if (!d.valid || millis() - d.updatedMs > PW_STALE_MS || d.updatedMs == s_acc.lastUpdatedMs) return;
+    if (isStale(d.valid, d.updatedMs, PW_STALE_MS) || d.updatedMs == s_acc.lastUpdatedMs) return;
     s_acc.lastUpdatedMs = d.updatedMs;
     s_acc.n++;
     s_acc.solar += d.solarW;
@@ -168,7 +164,7 @@ void sampleMinute() {
 
 void refreshStatus(bool withSpace) {
     sdcard::Info in = sdcard::info();
-    Guard g;
+    LockGuard g(s_lock);
     s_status.mounted = in.state == sdcard::State::Mounted;
     strlcpy(s_status.cardType, s_status.mounted ? sdcard::cardTypeName(in.cardType) : "", sizeof(s_status.cardType));
     s_status.clockMHz = in.freqHz / 1000000;
@@ -188,7 +184,7 @@ void sdTask(void *) {
     if (mounted) loadSettings();
     refreshStatus(true);
     {
-        Guard g;
+        LockGuard g(s_lock);
         s_status.firstMountDone = true;
     }
     uint32_t lastPoll = millis(), lastInfo = millis();
@@ -203,7 +199,7 @@ void sdTask(void *) {
                 Serial.printf("SD: card %s\n", m ? "mounted" : "removed");
                 if (m) {
                     if (!s_settingsLoaded) loadSettings();
-                    Guard g;
+                    LockGuard g(s_lock);
                     if (s_baselineLen) s_baselineDirty = true; // a swapped card gets today's baseline too
                 }
                 refreshStatus(true);
@@ -219,7 +215,7 @@ void sdTask(void *) {
             lastInfo = now;
             refreshStatus(true);
         } else {
-            Guard g;
+            LockGuard g(s_lock);
             s_status.lastWriteAgeS = s_haveWrite ? (millis() - s_lastWriteMs) / 1000 : UINT32_MAX;
         }
     }
@@ -228,41 +224,38 @@ void sdTask(void *) {
 } // namespace
 
 void historyStart() {
-    s_lock = xSemaphoreCreateMutex();
+    s_started = true;
     // Idle priority like the network tasks; 6 KB covers FatFs path handling and snprintf.
     xTaskCreatePinnedToCore(sdTask, "sd", 6144, nullptr, tskIDLE_PRIORITY, nullptr, 0);
 }
 
 SdStatus historyStatus() {
-    if (!s_lock) return SdStatus();
-    Guard g;
+    LockGuard g(s_lock);
     return s_status;
 }
 
 void historySaveBaseline(const void *data, size_t len) {
-    if (!s_lock || len > BASELINE_MAX) return;
-    Guard g;
+    if (len > BASELINE_MAX) return;
+    LockGuard g(s_lock);
     memcpy(s_baseline, data, len);
     s_baselineLen = len;
     s_baselineDirty = true;
 }
 
 bool historyLoadBaseline(void *data, size_t len) {
-    if (!s_lock) return false;
+    if (!s_started) return false; // no SD task, no card access
     return sdcard::readAtomic(BASELINE_PATH, data, len);
 }
 
 AppSettings settingsGet() {
-    if (!s_lock) return AppSettings();
-    Guard g;
+    LockGuard g(s_lock);
     return s_settings;
 }
 
 void settingsSetBrightness(uint8_t level) {
     if (level < B4848_LCD_BL_MIN) level = B4848_LCD_BL_MIN;
     board4848::setBacklight(level);
-    if (!s_lock) return;
-    Guard g;
+    LockGuard g(s_lock);
     s_settings.brightness = level;
     s_settingsDirty = true;
     s_settingsChangedMs = millis();

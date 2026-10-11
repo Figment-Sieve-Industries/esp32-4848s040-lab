@@ -4,6 +4,8 @@
 // baseline and every 5 minutes; after a power cut it is restored from there.
 #include "energy.h"
 #include "history.h"
+#include "shared_state.h"
+#include "time_util.h"
 #include <Arduino.h>
 #include <esp_attr.h>
 #include <stddef.h>
@@ -33,9 +35,8 @@ struct Baseline {
 // deterministic because startDay() memset()s the whole struct before filling it, and later updates
 // assign members only (never copy a Baseline built elsewhere). Keep it trivially copyable/standard
 // layout so memset and offsetof stay well defined.
-// NOLINTNEXTLINE(misc-redundant-expression): two different traits, not a repeated expression
-static_assert(std::is_standard_layout<Baseline>::value && std::is_trivially_copyable<Baseline>::value,
-              "Baseline is hashed and zeroed as raw bytes");
+static_assert(std::is_standard_layout<Baseline>::value, "Baseline is hashed and zeroed as raw bytes");
+static_assert(std::is_trivially_copyable<Baseline>::value, "Baseline is hashed and zeroed as raw bytes");
 
 RTC_NOINIT_ATTR Baseline rtc;
 
@@ -131,12 +132,15 @@ time_t midnightOf(time_t t) {
 
 void energyUpdate(const PwData &d) {
     // Only fresh data: frozen counters during an outage would put a whole gap into one baseline/bin
-    if (!d.valid || millis() - d.updatedMs > PW_STALE_MS) return;
+    if (isStale(d.valid, d.updatedMs, PW_STALE_MS)) return;
+    // Called every 500 ms but the gateway is polled every 2 s: this reading is already folded in
+    // (energyToday() still checks the date on every call)
+    if (stats.valid && d.updatedMs == statsUpdatedMs) return;
     if (d.solarExportedWh <= 0 || d.loadImportedWh <= 0) return; // never baseline on zero counters
     time_t now = time(nullptr);
+    if (!tu::clockValid(now)) return; // clock not synced yet
     struct tm tm;
     localtime_r(&now, &tm);
-    if (tm.tm_year < 124) return; // clock not synced yet (before 2024)
     if (!rtcValid() && !tryRestore()) return; // power cut: give the SD card a moment first
 
     bool reset = !countersSane(d);
@@ -207,7 +211,7 @@ void energyUpdate(const PwData &d) {
 // Totals are only returned while they are fresh and still belong to today's local date;
 // otherwise an invalid TodayStats (the screen shows "--") rather than old or yesterday's totals.
 TodayStats energyToday() {
-    if (!stats.valid || millis() - statsUpdatedMs > PW_STALE_MS) return TodayStats();
+    if (isStale(stats.valid, statsUpdatedMs, PW_STALE_MS)) return TodayStats();
     time_t now = time(nullptr);
     struct tm tm;
     localtime_r(&now, &tm);

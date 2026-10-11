@@ -33,7 +33,7 @@ struct SunData {
 SunData sunData();
 
 // Sun photo (SOHO HMI intensitygram, 512x512 JPEG) decoded, downscaled and tinted into a
-// SUN_IMG_PX square RGB565 buffer in PSRAM, with black outside the solar disc. Double-buffered:
+// SUN_IMG_PX square RGB565 buffer in PSRAM, black outside the solar disc. Double-buffered:
 // a new image goes to the back buffer and is then swapped in, so the pointer the screen holds
 // stays valid until the following fetch (an hour later).
 constexpr int SUN_IMG_PX = 200;

@@ -6,16 +6,20 @@
 // 401/403 means the token expired or is missing, so log in again (with back-off on failure).
 //
 // One network task on core 0 (LVGL runs on core 1 and never touches the network). Each pass polls
-// the gateway over its long-lived HTTPS connection, then runs at most one due background job
-// (weather, sky.cpp, space.cpp, enso.cpp), each with its own client and a pinned CA. Being one task
-// means only one TLS session exists at a time: the gateway connection is closed before a job's.
+// the gateway over its long-lived HTTPS connection, then runs at most one due background job from
+// JOBS (weather here; sky.cpp, space.cpp, enso.cpp), each through a net::Session with a pinned CA and
+// a time budget. Being one task means only one TLS session exists at a time: the gateway connection
+// is closed before a TLS job starts.
 #include "powerwall.h"
+#include "ca_certs.h"
 #include "enso.h"
-#include "psram_json.h"
+#include "mem_util.h"
+#include "net_http.h"
+#include "secrets.h"
+#include "shared_state.h"
 #include "sky.h"
 #include "space.h"
-#include "ca_certs.h"
-#include "secrets.h"
+#include "time_util.h"
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -24,52 +28,45 @@
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
 
-volatile uint8_t g_netPhase; // DIAG stutter
+volatile uint8_t g_netPhase; // DIAG stutter: 0 idle, 1 gateway poll, 2 background job (read by main.cpp)
 
 namespace {
 
 constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
 constexpr uint32_t READ_TIMEOUT_MS = 3000;
 constexpr uint32_t HANDSHAKE_TIMEOUT_S = 8; // default is 120 s, which would freeze polling
-constexpr uint32_t WEATHER_HANDSHAKE_TIMEOUT_S = 5;
-constexpr uint32_t WEATHER_READ_TIMEOUT_MS = 5000;
-constexpr uint32_t WEATHER_PERIOD_MS = 15 * 60 * 1000UL;
-constexpr uint32_t SKY_PERIOD_MS = 30 * 60 * 1000UL;   // aurora + Kp
-constexpr uint32_t SKY_RETRY_MS = 5 * 60 * 1000UL;     // after a failed sky fetch
-constexpr uint32_t SUN_IMAGE_PERIOD_MS = 60 * 60 * 1000UL;
-constexpr uint32_t SUN_IMAGE_RETRY_MS = 10 * 60 * 1000UL;
-constexpr uint32_t ENSO_PERIOD_MS = 12 * 60 * 60 * 1000UL; // CPC updates weekly/monthly
-constexpr uint32_t ENSO_RETRY_MS = 30 * 60 * 1000UL;
+constexpr uint32_t GW_BODY_DEADLINE_MS = 5000;
+constexpr size_t GW_BUF = 16 * 1024;        // gateway bodies (aggregates is the largest, a few KB)
+constexpr size_t WEATHER_BUF = 16 * 1024;   // Open-Meteo body is ~3 KB
+constexpr uint32_t MIN = 60 * 1000UL;
 
 WiFiMulti s_wifiMulti;
-// Protects s_data / s_weather / s_net. Created at static init: the SD task reads powerwallData()
-// before powerwallStart() runs.
-SemaphoreHandle_t s_lock = xSemaphoreCreateMutex();
-PwData s_data;
-WeatherData s_weather;
-NetStatus s_net;
+// Namespace-scope, so the mutexes exist from static init: the SD task reads powerwallData() before
+// powerwallStart() runs.
+Shared<PwData> s_data;
+Shared<WeatherData> s_weather;
+Shared<NetStatus> s_net;
 uint32_t s_pollMs;
 TaskHandle_t s_netTask;
 
 // Gateway connection (network task only)
 WiFiClientSecure s_gwClient;
 HTTPClient s_gwHttp;
+char *s_gwBuf;      // GW_BUF bytes in PSRAM: every gateway body is read into it and parsed in place
 String s_token;
 int s_loginFailures = 0;
 uint32_t s_nextLoginMs = 0;
 bool s_backingOff = false; // s_nextLoginMs is only meaningful while set (millis() wraps after ~49 days)
 
 void setError(const char *msg) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    strlcpy(s_data.error, msg, sizeof(s_data.error));
-    xSemaphoreGive(s_lock);
+    s_data.with([msg](PwData &d) { strlcpy(d.error, msg, sizeof(d.error)); });
 }
 
 // Keeps a more specific message that is already showing
 void setErrorIfNone(const char *msg) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (!s_data.error[0]) strlcpy(s_data.error, msg, sizeof(s_data.error));
-    xSemaphoreGive(s_lock);
+    s_data.with([msg](PwData &d) {
+        if (!d.error[0]) strlcpy(d.error, msg, sizeof(d.error));
+    });
 }
 
 void setHttpError(const char *what, int code) {
@@ -81,16 +78,24 @@ void setHttpError(const char *what, int code) {
 
 String gwUrl(const char *path) { return String("https://") + PW_HOST + path; }
 
-// Starts a request on the shared keep-alive connection
-// http10: HTTP/1.0 request -> the gateway sends a plain (non-chunked) body and closes the
-// connection. Used for the chunked /aggregates response: HTTPClient's chunk reader on a
-// kept-alive TLS connection could stall in a non-yielding read loop (watchdog reset).
-void gwBegin(const char *path, bool http10 = false) {
+// Starts a request on the shared gateway connection.
+// keepAlive false: HTTP/1.0 request -> the gateway sends a plain (non-chunked) body and closes the
+// connection. keepAlive true: HTTP/1.1, the connection stays open; a chunked body is de-chunked by
+// net::readBody (HTTPClient's own chunk reader on a kept-alive TLS connection could stall in a
+// non-yielding read loop: watchdog reset).
+void gwBegin(const char *path, bool keepAlive) {
+    if (!s_gwClient.connected()) net::noteTlsConnect(); // this request makes a new TLS connection
     s_gwHttp.begin(s_gwClient, gwUrl(path));
-    s_gwHttp.useHTTP10(http10);
-    s_gwHttp.setReuse(!http10);
+    s_gwHttp.useHTTP10(!keepAlive);
+    s_gwHttp.setReuse(keepAlive);
     s_gwHttp.setConnectTimeout(CONNECT_TIMEOUT_MS);
     s_gwHttp.setTimeout(READ_TIMEOUT_MS);
+}
+
+// Reads a 200 response's body into s_gwBuf. Returns its length, or -1 (logged by the caller's code).
+int gwBody() {
+    size_t len = 0;
+    return net::readBody(s_gwHttp, s_gwBuf, GW_BUF, len, GW_BODY_DEADLINE_MS) == net::Result::Ok ? (int)len : -1;
 }
 
 bool login() {
@@ -101,7 +106,7 @@ bool login() {
         }
         s_backingOff = false; // back-off elapsed
     }
-    gwBegin("/api/login/Basic");
+    gwBegin("/api/login/Basic", true);
     s_gwHttp.addHeader("Content-Type", "application/json");
     JsonDocument req(psramJson());
     req["username"] = "customer";
@@ -111,11 +116,12 @@ bool login() {
     String body;
     serializeJson(req, body);
     int code = s_gwHttp.POST(body);
-    String resp = code == 200 ? s_gwHttp.getString() : String(); // getString() de-chunks
+    const int len = code == 200 ? gwBody() : -1;
     s_gwHttp.end();
 
     JsonDocument res(psramJson());
-    if (code == 200 && !deserializeJson(res, resp) && res["token"].is<const char *>()) {
+    if (code == 200 && len >= 0 && !deserializeJson(res, (const char *)s_gwBuf, (size_t)len) &&
+        res["token"].is<const char *>()) {
         s_token = res["token"].as<const char *>();
         s_loginFailures = 0;
         s_backingOff = false;
@@ -135,20 +141,22 @@ bool login() {
     return false;
 }
 
-// GET a path and parse it (optionally through a filter). Returns the HTTP status (<0 = transport error).
-int getJson(const char *path, JsonDocument &doc, const JsonDocument *filter = nullptr, bool http10 = false) {
-    gwBegin(path, http10);
+// GET a path and parse it (optionally through a filter). Returns the HTTP status (<0 = transport
+// error, -100 = body or JSON incomplete).
+int getJson(const char *path, JsonDocument &doc, const JsonDocument *filter, bool keepAlive) {
+    gwBegin(path, keepAlive);
     s_gwHttp.addHeader("Authorization", "Bearer " + s_token);
     int code = s_gwHttp.GET();
     if (code == 200) {
-        // getString() de-chunks the body. The gateway sends larger responses with chunked transfer
-        // encoding, and parsing getStream() directly reads the hex chunk-size line as a JSON number.
-        String body = s_gwHttp.getString();
-        DeserializationError err = filter ? deserializeJson(doc, body, DeserializationOption::Filter(*filter))
-                                          : deserializeJson(doc, body);
-        if (err || !doc.is<JsonObject>()) code = -100;
+        const int len = gwBody();
+        // const char *: ArduinoJson copies the strings, so s_gwBuf can be reused for the next body
+        const char *body = s_gwBuf;
+        if (len < 0) code = -100;
+        else if (filter) code = deserializeJson(doc, body, (size_t)len, DeserializationOption::Filter(*filter)) ? -100 : 200;
+        else code = deserializeJson(doc, body, (size_t)len) ? -100 : 200;
+        if (code == 200 && !doc.is<JsonObject>()) code = -100;
     }
-    s_gwHttp.end(); // keeps the connection open for reuse
+    s_gwHttp.end(); // keeps the connection open for reuse when the request asked for keep-alive
     return code;
 }
 
@@ -171,17 +179,18 @@ const JsonDocument &aggregatesFilter() {
 bool pollOnce() {
     if (s_token.isEmpty() && !login()) return false;
 
-    // Small fixed-length responses first on the kept-alive connection, then the chunked
-    // aggregates as HTTP/1.0 (closes the connection) -> one TLS handshake per poll.
+    // Small fixed-length responses first on the kept-alive connection, then the chunked aggregates:
+    // HTTP/1.0 by default (closes the connection -> one TLS handshake per poll), or kept alive with
+    // PW_GW_KEEPALIVE (no handshake while the gateway keeps the connection open).
     JsonDocument agg(psramJson()), soe(psramJson()), grid(psramJson());
-    int codeSoe = getJson("/api/system_status/soe", soe);
+    int codeSoe = getJson("/api/system_status/soe", soe, nullptr, true);
     if (codeSoe == 401 || codeSoe == 403) {
         s_token = "";
         if (!login()) return false;
-        codeSoe = getJson("/api/system_status/soe", soe);
+        codeSoe = getJson("/api/system_status/soe", soe, nullptr, true);
     }
-    int codeGrid = getJson("/api/system_status/grid_status", grid);
-    int code = getJson("/api/meters/aggregates", agg, &aggregatesFilter(), true);
+    int codeGrid = getJson("/api/system_status/grid_status", grid, nullptr, true);
+    int code = getJson("/api/meters/aggregates", agg, &aggregatesFilter(), PW_GW_KEEPALIVE != 0);
     if (code != 200) {
         setHttpError("aggregates", code);
         s_gwClient.stop(); // start clean next time
@@ -245,35 +254,35 @@ bool pollOnce() {
         haveGrid = true;
     }
 
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_data.siteW = n.siteW;
-    s_data.batteryW = n.batteryW;
-    s_data.loadW = n.loadW;
-    s_data.solarW = n.solarW;
-    s_data.voltageV = n.voltageV;
-    s_data.siteVar = n.siteVar;
-    s_data.siteVA = n.siteVA;
-    s_data.loadVar = n.loadVar;
-    s_data.loadVA = n.loadVA;
-    s_data.frequencyHz = n.frequencyHz;
-    s_data.solarExportedWh = n.solarExportedWh;
-    s_data.loadImportedWh = n.loadImportedWh;
-    s_data.siteExportedWh = n.siteExportedWh;
-    s_data.siteImportedWh = n.siteImportedWh;
-    s_data.battExportedWh = n.battExportedWh;
-    s_data.battImportedWh = n.battImportedWh;
-    if (haveSoc) {
-        s_data.soc = soc;
-        s_data.socValid = true;
-    }
-    if (haveGrid) {
-        s_data.gridConnected = gridConnected;
-        s_data.gridServicesActive = gridServices;
-    }
-    s_data.valid = true;
-    s_data.updatedMs = millis();
-    s_data.error[0] = '\0';
-    xSemaphoreGive(s_lock);
+    s_data.with([&](PwData &d) {
+        d.siteW = n.siteW;
+        d.batteryW = n.batteryW;
+        d.loadW = n.loadW;
+        d.solarW = n.solarW;
+        d.voltageV = n.voltageV;
+        d.siteVar = n.siteVar;
+        d.siteVA = n.siteVA;
+        d.loadVar = n.loadVar;
+        d.loadVA = n.loadVA;
+        d.frequencyHz = n.frequencyHz;
+        d.solarExportedWh = n.solarExportedWh;
+        d.loadImportedWh = n.loadImportedWh;
+        d.siteExportedWh = n.siteExportedWh;
+        d.siteImportedWh = n.siteImportedWh;
+        d.battExportedWh = n.battExportedWh;
+        d.battImportedWh = n.battImportedWh;
+        if (haveSoc) {
+            d.soc = soc;
+            d.socValid = true;
+        }
+        if (haveGrid) {
+            d.gridConnected = gridConnected;
+            d.gridServicesActive = gridServices;
+        }
+        d.valid = true;
+        d.updatedMs = millis();
+        d.error[0] = '\0';
+    });
     return true;
 }
 
@@ -287,26 +296,24 @@ bool fetchWeather() {
              "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
              "&hourly=temperature_2m,weather_code,is_day&forecast_hours=11&forecast_days=1&timezone=auto",
              (double)WEATHER_LAT, (double)WEATHER_LON);
-    WiFiClientSecure client;
-    client.setCACert(OPEN_METEO_CA); // public internet: verify the server
-    // This runs on the network task, so gateway polling pauses: keep the worst case bounded
-    // (connect 3 s + handshake 5 s + read 5 s) instead of the gateway's 8 s handshake / 8 s read.
-    client.setHandshakeTimeout(WEATHER_HANDSHAKE_TIMEOUT_S);
-    HTTPClient http;
-    http.begin(client, url);
-    http.setReuse(false);
-    http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-    http.setTimeout(WEATHER_READ_TIMEOUT_MS);
-    int code = http.GET();
-    String body = code == 200 ? http.getString() : String();
-    http.end();
-    client.stop();
-    if (code != 200) {
-        Serial.printf("Weather: %s\n", code < 0 ? HTTPClient::errorToString(code).c_str() : String(code).c_str());
+    HeapBuf body;
+    if (!body.psram(WEATHER_BUF)) {
+        Serial.println("Weather: no PSRAM for the body");
         return false;
     }
+    size_t len = 0;
+    {
+        net::Options o;
+        o.tag = "Weather";
+        o.ca = LETS_ENCRYPT_CA; // public internet: verify the server
+        o.budgetMs = PW_JOB_BUDGET_MS;
+        net::Session s(o);
+        net::Response r;
+        if (s.get(url, body.as<char>(), body.size, &r) != net::Result::Ok) return false;
+        len = r.len;
+    } // TLS session freed before parsing
     JsonDocument doc(psramJson());
-    if (deserializeJson(doc, body) || !doc["current"]["weather_code"].is<int>() ||
+    if (deserializeJson(doc, body.as<const char>(), len) || !doc["current"]["weather_code"].is<int>() ||
         !doc["current"]["temperature_2m"].is<float>()) {
         Serial.println("Weather: incomplete response");
         return false;
@@ -334,65 +341,78 @@ bool fetchWeather() {
     }
     w.valid = true;
     w.updatedMs = millis();
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_weather = w;
-    xSemaphoreGive(s_lock);
+    s_weather.set(w);
     Serial.printf("Weather: %.1f C code %d (H %.1f L %.1f, rain %d%%)\n", w.tempC, w.code, w.hiC, w.loC, w.rainPct);
     return true;
 }
 
 void updateNetStatus(bool up) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_net.wifiUp = up;
+    NetStatus n = s_net.get();
+    n.wifiUp = up;
     if (up) {
-        strlcpy(s_net.ssid, WiFi.SSID().c_str(), sizeof(s_net.ssid));
-        s_net.rssi = WiFi.RSSI(); // NOLINT(bugprone-signed-char-misuse): int8 dBm, sign extension intended
+        strlcpy(n.ssid, WiFi.SSID().c_str(), sizeof(n.ssid)); // WiFi calls outside the lock
+        n.rssi = WiFi.RSSI(); // NOLINT(bugprone-signed-char-misuse): int8 dBm, sign extension intended
     }
-    xSemaphoreGive(s_lock);
+    s_net.set(n);
 }
 
-// One scheduled background job: due when millis() reaches `next`.
-struct Job {
-    uint32_t next = 0;
-    bool due(uint32_t now) const { return (int32_t)(now - next) >= 0; }
-    void after(uint32_t now, uint32_t ms) { next = now + ms; }
+// ---- Background jobs ----------------------------------------------------------------------------
+// Highest priority first; at most one job runs per pass, so the gateway keeps polling in between.
+struct JobDef {
+    const char *name;
+    bool (*fn)();
+    bool tls;          // closes the gateway connection first and logs the [tls] line
+    uint32_t okMs;     // next run after success
+    uint32_t retryMs;  // after a failure (first retry when backoff)
+    bool backoff;      // retry 1, 2, 4 ... up to okMs
+    bool (*needed)();  // nullptr = always; when false the job is skipped this pass (checked every pass)
 };
 
-// Run a TLS job with the gateway's session closed first (one TLS session at a time), logging the
+const JobDef JOBS[] = {
+    {"weather", fetchWeather, true, 15 * MIN, 1 * MIN, true, nullptr},
+    {"aurora", skyFetchAurora, false, 30 * MIN, 5 * MIN, false, nullptr}, // plain HTTP
+    {"kp", skyFetchKp, true, 30 * MIN, 5 * MIN, false, nullptr},
+    {"moon", skyFetchMoon, true, 30 * MIN, 5 * MIN, false, skyMoonNeeded}, // once per local day
+    {"swpc", spaceFetchSwpc, true, 30 * MIN, 5 * MIN, false, nullptr},
+    {"sunimg", spaceFetchSunImage, true, 60 * MIN, 10 * MIN, false, nullptr},
+    {"enso", ensoFetch, true, 12 * 60 * MIN, 30 * MIN, false, nullptr}, // CPC updates weekly/monthly
+};
+constexpr size_t JOB_COUNT = sizeof(JOBS) / sizeof(JOBS[0]);
+
+struct JobState {
+    uint32_t next = 0;     // due when millis() reaches it
+    uint32_t retryMs = 0;  // current back-off step (backoff jobs)
+};
+JobState s_jobs[JOB_COUNT];
+
+// Runs a TLS job with the gateway's session closed first (one TLS session at a time), logging the
 // internal-RAM low-water mark it reached.
-template <typename F> bool withTls(F fn) {
+bool runTls(const JobDef &j) {
     s_gwClient.stop();
     size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t minBefore = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    bool ok = fn();
-    Serial.printf("  [tls] job free before %u, min ever %u -> %u\n", (unsigned)before, (unsigned)minBefore,
-                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    bool ok = j.fn();
+    Serial.printf("  [tls] %s: job free before %u, min ever %u -> %u\n", j.name, (unsigned)before,
+                  (unsigned)minBefore, (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
     return ok;
 }
 
-// Runs at most one due job per call, so the gateway keeps polling in between.
 void runOneJob() {
-    static Job weather, aurora, kp, moon, swpc, sunImg, enso;
-    static uint32_t weatherRetryMs = 60000;
-    uint32_t now = millis();
-    if (weather.due(now)) {
-        bool ok = withTls(fetchWeather);
-        // 15 min when OK; on failure retry after 1, 2, 4 ... up to 15 min
-        weather.after(millis(), ok ? WEATHER_PERIOD_MS : weatherRetryMs);
-        weatherRetryMs = ok ? 60000 : (weatherRetryMs * 2 > WEATHER_PERIOD_MS ? WEATHER_PERIOD_MS : weatherRetryMs * 2);
-    } else if (aurora.due(now)) {
-        aurora.after(millis(), skyFetchAurora() ? SKY_PERIOD_MS : SKY_RETRY_MS); // plain HTTP
-    } else if (kp.due(now)) {
-        kp.after(millis(), withTls(skyFetchKp) ? SKY_PERIOD_MS : SKY_RETRY_MS);
-    } else if (moon.due(now) && skyMoonNeeded()) {
-        // Once per local day; checked again every 30 min (and after midnight)
-        moon.after(millis(), withTls(skyFetchMoon) ? SKY_PERIOD_MS : SKY_RETRY_MS);
-    } else if (swpc.due(now)) {
-        swpc.after(millis(), withTls(spaceFetchSwpc) ? SKY_PERIOD_MS : SKY_RETRY_MS);
-    } else if (sunImg.due(now)) {
-        sunImg.after(millis(), withTls(spaceFetchSunImage) ? SUN_IMAGE_PERIOD_MS : SUN_IMAGE_RETRY_MS);
-    } else if (enso.due(now)) {
-        enso.after(millis(), withTls(ensoFetch) ? ENSO_PERIOD_MS : ENSO_RETRY_MS);
+    const uint32_t now = millis();
+    for (size_t i = 0; i < JOB_COUNT; i++) {
+        const JobDef &j = JOBS[i];
+        JobState &st = s_jobs[i];
+        if ((int32_t)(now - st.next) < 0) continue;
+        if (j.needed && !j.needed()) continue;
+        const bool ok = j.tls ? runTls(j) : j.fn();
+        uint32_t wait = ok ? j.okMs : j.retryMs;
+        if (j.backoff) {
+            if (!st.retryMs) st.retryMs = j.retryMs;
+            wait = ok ? j.okMs : st.retryMs;
+            st.retryMs = ok ? j.retryMs : (st.retryMs * 2 > j.okMs ? j.okMs : st.retryMs * 2);
+        }
+        st.next = millis() + wait;
+        return;
     }
 }
 
@@ -425,7 +445,7 @@ void netTask(void *) {
         pollOnce();
         g_netPhase = 2;
         // Background jobs need NTP time: TLS certificate validity is checked against it
-        if (time(nullptr) >= 1700000000) runOneJob();
+        if (tu::clockValid()) runOneJob();
         g_netPhase = 0;
         uint32_t spent = millis() - start;
         vTaskDelay(pdMS_TO_TICKS(spent < s_pollMs ? s_pollMs - spent : 100));
@@ -451,6 +471,10 @@ void tlsFree(void *p) { heap_caps_free(p); }
 
 void powerwallStart(uint32_t pollMs) {
     s_pollMs = pollMs;
+    s_gwBuf = static_cast<char *>(psramAlloc(GW_BUF));
+    if (!s_gwBuf) s_gwBuf = static_cast<char *>(internalAlloc(GW_BUF)); // no PSRAM: should not happen
+    const char *keys[] = {"Transfer-Encoding"}; // net::readBody detects chunked bodies from it
+    s_gwHttp.collectHeaders(keys, 1);
     mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree); // before any TLS session exists
     WiFi.persistent(false); // don't write the Wi-Fi config to NVS (internal flash) at runtime
     WiFi.mode(WIFI_STA);
@@ -463,25 +487,10 @@ void powerwallStart(uint32_t pollMs) {
     xTaskCreatePinnedToCore(netTask, "pw_net", 12288, nullptr, tskIDLE_PRIORITY, &s_netTask, 0);
 }
 
-PwData powerwallData() {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    PwData d = s_data;
-    xSemaphoreGive(s_lock);
-    return d;
-}
+PwData powerwallData() { return s_data.get(); }
 
-WeatherData weatherData() {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    WeatherData w = s_weather;
-    xSemaphoreGive(s_lock);
-    return w;
-}
+WeatherData weatherData() { return s_weather.get(); }
 
-NetStatus networkStatus() {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    NetStatus n = s_net;
-    xSemaphoreGive(s_lock);
-    return n;
-}
+NetStatus networkStatus() { return s_net.get(); }
 
 uint32_t netTaskStackFree() { return s_netTask ? uxTaskGetStackHighWaterMark(s_netTask) : 0; }
