@@ -12,6 +12,14 @@ lv_obj_t *todayCreate();   // today's energy
 void todayRefresh();
 void todayOnShow();
 
+lv_obj_t *historyCreate(); // energy history: day / week / month charts (day_history.h)
+void historyRefresh();
+void historyOnShow();
+// Test hooks for the serial "y" command (main.cpp). They act like the on-screen controls.
+bool historySetMode(int mode); // 0 day, 1 week, 2 month; false if out of range
+bool historyStep(int dir);     // -1 previous period, +1 next; false if not possible (next from the current period)
+void historyDescribe(char *buf, size_t n); // one line: mode, period label, slots with data, totals, loading flag
+
 lv_obj_t *healthCreate();  // battery & grid
 void healthRefresh();
 void healthOnShow();

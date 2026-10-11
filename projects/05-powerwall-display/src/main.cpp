@@ -2,7 +2,7 @@
 // Live Tesla Powerwall 3 dashboard on the 4" panel, read from the gateway's local LAN API.
 // Network polling runs on core 0 (powerwall.cpp); LVGL runs in loop() on core 1.
 //
-// Screens (swipe left/right): power flow, today, battery & grid, weather, moon, aurora, sun, El Nino,
+// Screens (swipe left/right): power flow, today, history, battery & grid, weather, moon, aurora, sun, El Nino,
 // settings, about (see ui::ScreenIndex).
 //
 // SCREEN_ROTATION: 0 = native, 1 = 90 deg clockwise, 2 = 180, 3 = 90 deg counter-clockwise.
@@ -26,6 +26,8 @@
 //              steps, `ms` apart (default 1000, 100..10000), printing a "bs i/n duty D" line per step, for
 //              watching the panel. Runs in the background; "bs 0" or any b/bd/bf command stops it. The
 //              brightness setting is restored at the end. Procedure: docs/02-pinout.md.
+//   y [arg]    history screen: d / w / m = day / week / month tab, - / + = previous / next period, no arg =
+//              describe what it shows; every form also prints the day-history store status
 //   m          print the memory / heap line now
 //   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
 //   v <0|1>    privacy mode for screenshots: placeholder Wi-Fi name and town (not saved)
@@ -40,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cache.h"
+#include "day_history.h"
 #include "energy.h"
 #include "history.h"
 #include "net_http.h"
@@ -75,6 +78,7 @@ struct ScreenDef {
 static ScreenDef screens[ui::SCREEN_COUNT] = {
     {"house", houseCreate, houseRefresh, nullptr, nullptr},
     {"today", todayCreate, todayRefresh, todayOnShow, nullptr},
+    {"history", historyCreate, historyRefresh, historyOnShow, nullptr},
     {"health", healthCreate, healthRefresh, healthOnShow, nullptr},
     {"weather", weatherCreate, weatherRefresh, weatherOnShow, nullptr},
     {"moon", moonCreate, moonRefresh, moonOnShow, nullptr},
@@ -116,7 +120,9 @@ extern volatile uint8_t g_netPhase; // DIAG stutter: 0 idle, 1 gateway poll, 2 b
 
 static void refreshCb(lv_timer_t *) {
     uint32_t t0 = millis(); // DIAG
-    energyUpdate(powerwallData()); // always, so today's totals keep counting
+    PwData pw = powerwallData();
+    energyUpdate(pw); // always, so today's totals keep counting
+    dayhist::dayHistoryUpdate(pw, energyToday()); // today's hourly bins for the history screen
     uint32_t t1 = millis();
     screens[current].refresh();
     ui::topBarUpdateFor(current); // screens made with screenCreate(index) don't update their own top bar
@@ -421,6 +427,27 @@ static void handleBacklightCommand(char sub, const char *arg) {
     }
 }
 
+// y [d|w|m|-|+]: drive the history screen like its controls, then describe it (see the top of the file)
+static void cmdHistory(const char *arg) {
+    bool ok = true;
+    if (!strcmp(arg, "d")) ok = historySetMode(0);
+    else if (!strcmp(arg, "w")) ok = historySetMode(1);
+    else if (!strcmp(arg, "m")) ok = historySetMode(2);
+    else if (!strcmp(arg, "-")) ok = historyStep(-1);
+    else if (!strcmp(arg, "+")) ok = historyStep(+1);
+    else if (*arg) {
+        cmdReply("#err usage: y [d|w|m|-|+]");
+        return;
+    }
+    char line[200];
+    dayhist::dayHistoryStatusLine(line, sizeof(line));
+    cmdReply(line);
+    historyDescribe(line, sizeof(line));
+    char msg[230];
+    snprintf(msg, sizeof(msg), "%s %s", line, ok ? "#ok" : "#err not possible");
+    cmdReply(msg);
+}
+
 static void handleCommand(char *line) {
     while (*line == ' ' || *line == '\t') line++;
     char cmd = *line;
@@ -445,7 +472,7 @@ static void handleCommand(char *line) {
     long v = 0;
     switch (cmd) {
         case 's':
-            if (!parseInt(arg, 0, ui::SCREEN_COUNT - 1, v)) cmdReply("#err usage: s <0..9>");
+            if (!parseInt(arg, 0, ui::SCREEN_COUNT - 1, v)) cmdReply("#err usage: s <0..10>");
             else cmdGoto(static_cast<int>(v));
             break;
         case 'n':
@@ -459,6 +486,9 @@ static void handleCommand(char *line) {
             break;
         case 'b':
             handleBacklightCommand(sub, arg);
+            break;
+        case 'y':
+            cmdHistory(arg);
             break;
         case 'm':
             cmdMem();
@@ -486,8 +516,8 @@ static void handleCommand(char *line) {
             ESP.restart();
             break;
         case 'h':
-            cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | bf <hz> | bd <duty> | br | "
-                     "bs [steps ms from to] | m memory | x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
+            cmdReply("commands: s <0..10> go to screen | n next | p previous | l list | b <0-255> backlight | bf <hz> | bd <duty> | br | "
+                     "bs [steps ms from to] | y [d|w|m|-|+] history | m memory | x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");

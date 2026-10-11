@@ -7,6 +7,7 @@
 #include <SD.h>
 #include <sd_store.h>
 
+#include "day_history.h"
 #include "powerwall.h"
 #include "shared_state.h"
 #include "time_util.h"
@@ -216,6 +217,7 @@ void sdTask(void *) {
             }
         }
         sampleMinute();
+        dayhist::dayHistorySdTick(mounted); // history screen: saves due day records, serves reads
         if (mounted) {
             saveBaselineIfDirty();
             saveSettingsIfDue();
