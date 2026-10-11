@@ -10,9 +10,13 @@
 // JOBS (weather here; sky.cpp, space.cpp, enso.cpp), each through a net::Session with a pinned CA and
 // a time budget. Being one task means only one TLS session exists at a time: the gateway connection
 // is closed before a TLS job starts.
+// After boot the jobs' last results come back from the SD cache (cache.h) first, so the screens fill at
+// once and a job whose data is still inside its refresh window waits for it to end.
 #include "powerwall.h"
 #include "ca_certs.h"
+#include "cache.h"
 #include "enso.h"
+#include "history.h"
 #include "mem_util.h"
 #include "net_http.h"
 #include "secrets.h"
@@ -27,6 +31,7 @@
 #include <WiFiMulti.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
+#include <stdarg.h>
 
 volatile uint8_t g_netPhase; // DIAG stutter: 0 idle, 1 gateway poll, 2 background job (read by main.cpp)
 
@@ -39,6 +44,10 @@ constexpr uint32_t GW_BODY_DEADLINE_MS = 5000;
 constexpr size_t GW_BUF = 16 * 1024;        // gateway bodies (aggregates is the largest, a few KB)
 constexpr size_t WEATHER_BUF = 16 * 1024;   // Open-Meteo body is ~3 KB
 constexpr uint32_t MIN = 60 * 1000UL;
+constexpr const char *WEATHER_REC = "weather"; // SD cache record name (cache.h)
+// After boot, wait at most this long (from the network task's start) for the SD card's first mount and
+// for the clock before restoring the cache
+constexpr uint32_t RESTORE_WAIT_MS = 20000;
 
 WiFiMulti s_wifiMulti;
 // Namespace-scope, so the mutexes exist from static init: the SD task reads powerwallData() before
@@ -343,7 +352,12 @@ bool fetchWeather() {
     w.updatedMs = millis();
     s_weather.set(w);
     Serial.printf("Weather: %.1f C code %d (H %.1f L %.1f, rain %d%%)\n", w.tempC, w.code, w.hiC, w.loC, w.rainPct);
+    cache::save(WEATHER_REC, WEATHER_CACHE_VERSION, w, time(nullptr));
     return true;
+}
+
+time_t restoreWeather() {
+    return cache::restoreInto(WEATHER_REC, WEATHER_CACHE_VERSION, s_weather, &WeatherData::updatedMs);
 }
 
 void updateNetStatus(bool up) {
@@ -366,16 +380,17 @@ struct JobDef {
     uint32_t retryMs;  // after a failure (first retry when backoff)
     bool backoff;      // retry 1, 2, 4 ... up to okMs
     bool (*needed)();  // nullptr = always; when false the job is skipped this pass (checked every pass)
+    time_t (*restore)(); // loads the job's SD cache record (named like the job); its fetch time, 0 = none
 };
 
 const JobDef JOBS[] = {
-    {"weather", fetchWeather, true, 15 * MIN, 1 * MIN, true, nullptr},
-    {"aurora", skyFetchAurora, false, 30 * MIN, 5 * MIN, false, nullptr}, // plain HTTP
-    {"kp", skyFetchKp, true, 30 * MIN, 5 * MIN, false, nullptr},
-    {"moon", skyFetchMoon, true, 30 * MIN, 5 * MIN, false, skyMoonNeeded}, // once per local day
-    {"swpc", spaceFetchSwpc, true, 30 * MIN, 5 * MIN, false, nullptr},
-    {"sunimg", spaceFetchSunImage, true, 60 * MIN, 10 * MIN, false, nullptr},
-    {"enso", ensoFetch, true, 12 * 60 * MIN, 30 * MIN, false, nullptr}, // CPC updates weekly/monthly
+    {"weather", fetchWeather, true, 15 * MIN, 1 * MIN, true, nullptr, restoreWeather},
+    {"aurora", skyFetchAurora, false, 30 * MIN, 5 * MIN, false, nullptr, skyRestoreAurora}, // plain HTTP
+    {"kp", skyFetchKp, true, 30 * MIN, 5 * MIN, false, nullptr, skyRestoreKp},
+    {"moon", skyFetchMoon, true, 30 * MIN, 5 * MIN, false, skyMoonNeeded, skyRestoreMoon}, // once per local day
+    {"swpc", spaceFetchSwpc, true, 30 * MIN, 5 * MIN, false, nullptr, spaceRestoreSwpc},
+    {"sunimg", spaceFetchSunImage, true, 60 * MIN, 10 * MIN, false, nullptr, spaceRestoreSunImage},
+    {"enso", ensoFetch, true, 12 * 60 * MIN, 30 * MIN, false, nullptr, ensoRestore}, // CPC updates weekly/monthly
 };
 constexpr size_t JOB_COUNT = sizeof(JOBS) / sizeof(JOBS[0]);
 
@@ -416,10 +431,88 @@ void runOneJob() {
     }
 }
 
+// ---- SD cache restore ---------------------------------------------------------------------------
+// Once after boot, before any job runs: the cached records fill the screens, and a job whose data is
+// still inside its refresh window is pushed back to when that window ends. Ages need the clock: without
+// it (internet down) the records are restored after RESTORE_WAIT_MS anyway, shown as fresh, and
+// restored once more when the clock is set, which then schedules the jobs.
+enum class Restore : uint8_t { Pending, NoClock, Done };
+Restore s_restore = Restore::Pending;
+uint32_t s_taskStartMs;
+
+// snprintf onto the end of buf (cap bytes); stops quietly when full
+__attribute__((format(printf, 3, 4))) void appendf(char *buf, size_t cap, const char *fmt, ...) {
+    const size_t len = strnlen(buf, cap);
+    if (len + 1 >= cap) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf + len, cap - len, fmt, ap);
+    va_end(ap);
+}
+
+// Restores every job's record; with the clock set, also schedules the jobs from the records' ages.
+// Returns how many records were restored. One summary line.
+int restoreCache(bool clockOk) {
+    if (!historyStatus().mounted) {
+        Serial.println("Cache: no SD card, nothing restored");
+        return 0;
+    }
+    const time_t now = time(nullptr);
+    char got[320] = "", none[80] = "";
+    int restored = 0;
+    for (size_t i = 0; i < JOB_COUNT; i++) {
+        const JobDef &j = JOBS[i];
+        const time_t utc = j.restore ? j.restore() : 0;
+        if (!utc) {
+            appendf(none, sizeof(none), "%s%s", none[0] ? ", " : "", j.name);
+            continue;
+        }
+        restored++;
+        if (!clockOk) continue;
+        char age[16];
+        cache::fmtAge(age, sizeof(age), (int64_t)(now - utc));
+        appendf(got, sizeof(got), "%s%s %s old", got[0] ? "; " : "", j.name, age);
+        if (j.needed) continue; // its predicate decides (moon: a record for today means no fetch)
+        // Only next is set: retryMs (weather's back-off step) is left alone
+        const uint32_t due = cache::dueInMs(utc, now, j.okMs);
+        s_jobs[i].next = millis() + due;
+        char in[16];
+        cache::fmtAge(in, sizeof(in), due / 1000);
+        if (due) appendf(got, sizeof(got), ", next in %s", in);
+        else appendf(got, sizeof(got), ", due now");
+    }
+    if (clockOk) {
+        Serial.printf("Cache: restored %d/%u%s%s%s%s\n", restored, (unsigned)JOB_COUNT, got[0] ? " - " : "", got,
+                      none[0] ? "; none: " : "", none);
+    } else {
+        Serial.printf("Cache: restored %d/%u, clock not set (shown as fresh until it is)%s%s\n", restored,
+                      (unsigned)JOB_COUNT, none[0] ? "; none: " : "", none);
+    }
+    return restored;
+}
+
+// Called every pass: restores the cache once the boot-time SD mount is done and the clock is set, each
+// waited for at most RESTORE_WAIT_MS from the task's start. Jobs run only after this (s_restore Done).
+void restorePass() {
+    if (s_restore == Restore::Done) return;
+    const bool clockOk = tu::clockValid();
+    if (s_restore == Restore::NoClock) {
+        if (!clockOk) return;
+    } else {
+        const bool waited = millis() - s_taskStartMs >= RESTORE_WAIT_MS;
+        if (!waited && (!clockOk || !historyStatus().firstMountDone)) return;
+    }
+    const int restored = restoreCache(clockOk);
+    // Restored without the clock: restore again once it is set, for the ages and the schedule
+    s_restore = clockOk || restored == 0 ? Restore::Done : Restore::NoClock;
+}
+
 void netTask(void *) {
     s_gwClient.setInsecure(); // the gateway uses a self-signed certificate (LAN only)
     s_gwClient.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
+    s_taskStartMs = millis();
     for (;;) {
+        restorePass(); // before the Wi-Fi check: the cache fills the screens without a network too
         if (s_wifiMulti.run(10000) != WL_CONNECTED) {
             updateNetStatus(false);
             setError("Wi-Fi not connected");
@@ -444,8 +537,9 @@ void netTask(void *) {
         g_netPhase = 1; // DIAG
         pollOnce();
         g_netPhase = 2;
-        // Background jobs need NTP time: TLS certificate validity is checked against it
-        if (tu::clockValid()) runOneJob();
+        // Background jobs need NTP time: TLS certificate validity is checked against it. And the cache
+        // restored first, so fresh records aren't fetched again.
+        if (s_restore == Restore::Done && tu::clockValid()) runOneJob();
         g_netPhase = 0;
         uint32_t spent = millis() - start;
         vTaskDelay(pdMS_TO_TICKS(spent < s_pollMs ? s_pollMs - spent : 100));

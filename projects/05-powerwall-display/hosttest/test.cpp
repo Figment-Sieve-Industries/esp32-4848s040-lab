@@ -1,6 +1,9 @@
 // Host tests for the plain-C++ parts of project 05: the HTTP body framing (net_body.h: de-chunker and
-// read loop), the date parsers (time_util.cpp) and the ENSO page/file parsers (enso.cpp, ENSO_HOST_TEST).
+// read loop), the date parsers (time_util.cpp), the ENSO page/file parsers (enso.cpp, ENSO_HOST_TEST)
+// and the SD cache (cache.cpp, CACHE_HOST_TEST, on an in-memory card).
 // Build and run: hosttest\run.ps1 (MSVC). Exit code = number of failed checks.
+#include <map>
+#include <set>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +19,8 @@
 #include "../src/time_util.cpp"
 #define ENSO_HOST_TEST 1
 #include "../src/enso.cpp"
+#define CACHE_HOST_TEST 1
+#include "../src/cache.cpp"
 
 static int g_fail = 0, g_pass = 0;
 #define CHECK(cond)                                                                                                    \
@@ -497,12 +502,340 @@ static void testEnso() {
     }
 }
 
+// ---- SD cache: in-memory card for sdcard::* (stubs/sd_store.h) ---------------------------------
+
+namespace fakesd {
+bool present = true;
+bool failWrites = false;
+std::set<std::string> dirs;
+std::map<std::string, std::string> files;
+void reset() {
+    present = true;
+    failWrites = false;
+    dirs.clear();
+    files.clear();
+}
+std::string parentOf(const std::string &p) { return p.substr(0, p.rfind('/')); }
+} // namespace fakesd
+
+namespace sdcard {
+bool mounted() { return fakesd::present; }
+bool mkdirs(const char *path) {
+    if (!fakesd::present) return false;
+    const std::string p = path;
+    for (size_t i = 1; i <= p.size(); i++)
+        if (i == p.size() || p[i] == '/') fakesd::dirs.insert(p.substr(0, i));
+    return true;
+}
+bool writeFile(const char *path, const void *data, size_t len) {
+    // like FatFs: no card, an I/O error, or a missing directory all fail
+    if (!fakesd::present || fakesd::failWrites || !fakesd::dirs.count(fakesd::parentOf(path))) return false;
+    fakesd::files[path] = std::string(static_cast<const char *>(data), len);
+    return true;
+}
+bool readFile(const char *path, void *buf, size_t cap, size_t *outLen) {
+    *outLen = 0;
+    if (!fakesd::present) return false;
+    auto it = fakesd::files.find(path);
+    if (it == fakesd::files.end()) return false;
+    const size_t n = it->second.size() < cap ? it->second.size() : cap;
+    memcpy(buf, it->second.data(), n);
+    *outLen = n;
+    return true;
+}
+} // namespace sdcard
+
+static bool has(const std::string &s, const char *part) { return s.find(part) != std::string::npos; }
+
+static void testCacheHelpers() {
+    using namespace cache;
+    const time_t now = 1791651600; // 2026-10-10 17:00 UTC
+    CHECK(crc32("123456789", 9) == 0xCBF43926u); // the standard check value
+    CHECK(crc32("", 0) == 0);
+
+    // header round trip and every rejection path
+    Header h;
+    makeHeader(h, 3, 100, now - 60);
+    CHECK(memcmp(h.magic, "PWC1", 4) == 0 && h.reserved == 0 && h.reserved2 == 0 && h.size == 100 && h.version == 3);
+    time_t t = -1;
+    CHECK(checkHeader(h, 3, 100, now, t) && t == now - 60);
+    {
+        Header b = h;
+        b.magic[3] = '2';
+        t = -1;
+        CHECK(!checkHeader(b, 3, 100, now, t) && t == -1); // untouched on failure
+    }
+    CHECK(!checkHeader(h, 4, 100, now, t));  // version
+    CHECK(!checkHeader(h, 2, 100, now, t));
+    CHECK(!checkHeader(h, 3, 101, now, t));  // size
+    CHECK(!checkHeader(h, 3, 99, now, t));
+    {
+        Header b = h;
+        b.reserved = 7; // reserved for later: not checked
+        CHECK(checkHeader(b, 3, 100, now, t));
+    }
+    makeHeader(h, 3, 100, 0); // zero time
+    CHECK(!checkHeader(h, 3, 100, now, t));
+    makeHeader(h, 3, 100, tu::MIN_VALID_UTC - 1); // before the clock can be valid
+    CHECK(!checkHeader(h, 3, 100, now, t));
+    makeHeader(h, 3, 100, tu::MIN_VALID_UTC);
+    CHECK(checkHeader(h, 3, 100, now, t) && t == tu::MIN_VALID_UTC);
+    makeHeader(h, 3, 100, -5);
+    CHECK(!checkHeader(h, 3, 100, now, t));
+    makeHeader(h, 3, 100, now + 300); // 5 min clock skew is fine
+    CHECK(checkHeader(h, 3, 100, now, t));
+    makeHeader(h, 3, 100, now + 301); // further in the future is not
+    CHECK(!checkHeader(h, 3, 100, now, t));
+    CHECK(checkHeader(h, 3, 100, 0, t) && t == now + 301); // unknown clock: can't tell, accepted
+    makeHeader(h, 3, 100, (time_t)4102444800LL); // 2100: never a real fetch time
+    CHECK(!checkHeader(h, 3, 100, 0, t));
+    makeHeader(h, 3, 100, now);
+    CHECK(checkHeader(h, 3, 100, now, t) && t == now);
+
+    // msFromUtc: millis() - result == age, also across the 2^32 wrap
+    auto age = [](uint32_t nowMs, uint32_t atMs) { return (uint32_t)(nowMs - atMs); };
+    CHECK(msFromUtc(now - 600, now, 1000000) == 1000000 - 600000);
+    CHECK(msFromUtc(now - 600, 0, 12345) == 12345);                       // unknown clock: just fetched
+    CHECK(msFromUtc(now - 600, tu::MIN_VALID_UTC - 1, 12345) == 12345);
+    CHECK(msFromUtc(now + 10, now, 5000) == 5000);                        // future: just fetched
+    CHECK(msFromUtc(now, now, 5000) == 5000);
+    CHECK(age(20000, msFromUtc(now - 3600, now, 20000)) == 3600000);      // 20 s after boot, 1 h old: wraps
+    CHECK(age(20000, msFromUtc(now - 1, now, 20000)) == 1000);
+    {
+        const uint32_t nearWrap = 0xFFFFFF00u;
+        const uint32_t at = msFromUtc(now - 10, now, nearWrap);
+        CHECK(age(nearWrap, at) == 10000);
+        CHECK(age(nearWrap + 1000u, at) == 11000); // millis() has wrapped past 0
+        CHECK(age(0x00000100u, msFromUtc(now - 10, now, 0x00000100u)) == 10000);
+    }
+    CHECK(age(5000, msFromUtc(now - 2147482, now, 5000)) == 2147482000u); // just below the clamp: exact
+    CHECK(age(5000, msFromUtc(now - 2147483, now, 5000)) == 0x7FFFFFFFu); // clamped (~24.8 days)
+    CHECK(age(5000, msFromUtc(tu::MIN_VALID_UTC, now, 5000)) == 0x7FFFFFFFu); // years old
+    CHECK(age(5000, msFromUtc(0, now, 5000)) == 0x7FFFFFFFu);
+    CHECK(age(5000, msFromUtc(-100, now, 5000)) == 0x7FFFFFFFu);
+    // with the staleness rule (millis() - fetchedMs > limit): 3 h old is stale for a 2 h limit, 1 h is not
+    CHECK(age(20000, msFromUtc(now - 3 * 3600, now, 20000)) > 2u * 3600u * 1000u);
+    CHECK(!(age(20000, msFromUtc(now - 3600, now, 20000)) > 2u * 3600u * 1000u));
+    CHECK(age(20000, msFromUtc(now - 30 * 86400, now, 20000)) > 3u * 86400u * 1000u); // ENSO 3-day limit
+
+    // utcFromMs
+    CHECK(utcFromMs(1000, 0, 6000) == 0);
+    CHECK(utcFromMs(1000, now, 6000) == now - 5);
+    CHECK(utcFromMs(0xFFFFF000u, now, 1000) == now - 5); // fetched before the wrap: 5096 ms ago
+    CHECK(utcFromMs(6000, now, 6000) == now);
+    for (uint32_t nowMs : {0u, 1u, 20000u, 0x7FFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u}) {
+        CHECK(utcFromMs(msFromUtc(now - 600, now, nowMs), now, nowMs) == now - 600); // round trip
+    }
+
+    // dueInMs
+    constexpr uint32_t MIN = 60000;
+    CHECK(dueInMs(0, now, 30 * MIN) == 0);
+    CHECK(dueInMs(now - 300, 0, 30 * MIN) == 0);              // unknown clock: due now
+    CHECK(dueInMs(now - 300, now, 30 * MIN) == 25 * MIN);
+    CHECK(dueInMs(now - 1799, now, 30 * MIN) == 1000);
+    CHECK(dueInMs(now - 1800, now, 30 * MIN) == 0);           // exactly one period
+    CHECK(dueInMs(now - 1801, now, 30 * MIN) == 0);
+    CHECK(dueInMs(now - 11 * 3600, now, 12 * 60 * MIN) == 60 * MIN);
+    CHECK(dueInMs(now, now, 30 * MIN) == 30 * MIN);
+    CHECK(dueInMs(now + 100, now, 30 * MIN) == 30 * MIN);     // future: a full period
+    CHECK(dueInMs(tu::MIN_VALID_UTC, now, 30 * MIN) == 0);    // years old
+    CHECK(dueInMs(now - 100, now, 0) == 0);
+    CHECK(dueInMs(now - 100, (time_t)4000000000000000000LL, 30 * MIN) == 0); // absurd now: no overflow
+    CHECK(dueInMs(now - 1, now, 0xFFFFFFFFu) == 0xFFFFFFFFu - 1000);
+
+    // fmtAge
+    char b[16];
+    const struct {
+        int64_t s;
+        const char *want;
+    } ages[] = {{0, "0 s"},       {89, "89 s"},       {90, "1 min"},     {5399, "89 min"},       {5400, "1 h"},
+                {47 * 3600 + 3599, "47 h"}, {48 * 3600, "2 d"}, {-5, "0 s"}, {(int64_t)1e15, "99999 d"}};
+    for (const auto &a : ages) {
+        fmtAge(b, sizeof b, a.s);
+        CHECK_EQ_STR(b, a.want);
+    }
+}
+
+struct CacheRec {
+    int32_t a;
+    float b;
+    char s[12];
+    int64_t t;
+};
+struct CacheRecBig {
+    int32_t a;
+    float b;
+    char s[12];
+    int64_t t;
+    int32_t extra;
+};
+struct CacheRecPub { // a record published through a Shared<T>-like object, with a millis() stamp
+    int32_t v;
+    uint32_t fetchedMs;
+};
+struct FakeShared {
+    CacheRecPub v{};
+    int sets = 0;
+    void set(const CacheRecPub &x) {
+        v = x;
+        sets++;
+    }
+};
+
+static void testCacheIo() {
+    fakesd::reset();
+    Serial.clear();
+    const time_t now = time(nullptr); // loadRaw checks against the real clock
+    CHECK(tu::clockValid(now));
+    const std::string path = "/powerwall/cache/test.bin";
+    const CacheRec rec = {42, 1.5f, "hello", 0x1122334455667788LL};
+    CacheRec out;
+    time_t t = 0;
+    auto sentinel = [&out] { memset(&out, 0xAB, sizeof out); };
+    auto untouched = [&out] {
+        const uint8_t *p = reinterpret_cast<const uint8_t *>(&out);
+        for (size_t i = 0; i < sizeof out; i++)
+            if (p[i] != 0xAB) return false;
+        return true;
+    };
+
+    // no card: nothing written, nothing logged
+    fakesd::present = false;
+    CHECK(!cache::save("test", 1, rec, now - 60));
+    CHECK(!cache::load("test", 1, out, t));
+    CHECK(fakesd::files.empty() && Serial.out.empty());
+    fakesd::present = true;
+
+    // no real time (clock not set): not saved
+    CHECK(!cache::save("test", 1, rec, 0));
+    CHECK(!cache::save("test", 1, rec, tu::MIN_VALID_UTC - 1));
+    CHECK(fakesd::files.empty());
+
+    // round trip (the directory is created: the fake card fails writes into a missing one)
+    CHECK(cache::save("test", 1, rec, now - 60));
+    CHECK(fakesd::files.count(path) && fakesd::files[path].size() == sizeof(cache::Header) + sizeof(CacheRec) + 4);
+    CHECK(fakesd::dirs.count("/powerwall") && fakesd::dirs.count("/powerwall/cache"));
+    sentinel();
+    CHECK(cache::load("test", 1, out, t) && t == now - 60 && memcmp(&out, &rec, sizeof rec) == 0);
+    CHECK(Serial.out.empty()); // success is silent (the restore summary reports it)
+
+    // missing file: silent
+    sentinel();
+    t = 123;
+    CHECK(!cache::load("other", 1, out, t) && untouched() && t == 123 && Serial.out.empty());
+
+    // wrong version / size (bigger and smaller struct)
+    sentinel();
+    CHECK(!cache::load("test", 2, out, t) && untouched() && has(Serial.out, "test ignored (version 1 != 2)"));
+    Serial.clear();
+    CacheRecBig big;
+    CHECK(!cache::load("test", 1, big, t) && has(Serial.out, "test ignored (size 32 != 40 B)"));
+    Serial.clear();
+    int32_t small = 0;
+    CHECK(!cache::load("test", 1, small, t) && has(Serial.out, "(size 32 != 4 B)"));
+    Serial.clear();
+
+    // damaged files; each case starts from a good copy
+    const std::string good = fakesd::files[path];
+    auto damaged = [&](const std::string &file, const char *why) {
+        fakesd::files[path] = file;
+        Serial.clear();
+        sentinel();
+        const bool rejected = !cache::load("test", 1, out, t) && untouched() && has(Serial.out, why);
+        if (!rejected) printf("  cache: expected '%s', got '%s'\n", why, Serial.out.c_str());
+        return rejected;
+    };
+    CHECK(damaged(good.substr(0, good.size() - 1), "file 59 B, expected 60"));     // CRC byte missing
+    CHECK(damaged(good.substr(0, 30), "file 30 B, expected 60"));                  // cut in the payload
+    CHECK(damaged(good.substr(0, 10), "file 10 B, expected 60"));                  // cut in the header
+    CHECK(damaged("", "file 0 B, expected 60"));
+    CHECK(damaged(good + "x", "file 61 B, expected 60"));                          // too long
+    std::string bad = good;
+    bad[24 + 5] ^= 0x01; // payload bit flip
+    CHECK(damaged(bad, "CRC mismatch"));
+    bad = good;
+    bad[16] ^= 0x01; // fetchedUtc bit flip: the CRC covers the header too
+    CHECK(damaged(bad, "CRC mismatch"));
+    bad = good;
+    bad[good.size() - 1] ^= 0x80; // the CRC itself
+    CHECK(damaged(bad, "CRC mismatch"));
+    bad = good;
+    bad[0] = 'X';
+    CHECK(damaged(bad, "not a cache record"));
+    bad = std::string(60, '\0'); // all zeros (e.g. a preallocated file)
+    CHECK(damaged(bad, "not a cache record"));
+    fakesd::files[path] = good;
+    CHECK(cache::load("test", 1, out, t) && memcmp(&out, &rec, sizeof rec) == 0); // the good copy still loads
+
+    // implausible times: an hour in the future (a valid record otherwise)
+    Serial.clear();
+    CHECK(cache::save("test", 1, rec, now + 3600));
+    sentinel();
+    CHECK(!cache::load("test", 1, out, t) && untouched() && has(Serial.out, "implausible fetch time"));
+    {
+        std::vector<uint8_t> r(cache::OVERHEAD + sizeof rec); // valid CRC around a zero time
+        cache::buildRecord(r.data(), 1, &rec, sizeof rec, 0);
+        Serial.clear();
+        CHECK(damaged(std::string(r.begin(), r.end()), "implausible fetch time"));
+    }
+
+    // overwrite with newer data
+    CacheRec rec2 = rec;
+    rec2.a = 7;
+    CHECK(cache::save("test", 1, rec2, now - 5));
+    CHECK(cache::load("test", 1, out, t) && out.a == 7 && t == now - 5);
+
+    // write failure is logged; a too-long name is refused
+    Serial.clear();
+    fakesd::failWrites = true;
+    CHECK(!cache::save("test", 1, rec, now) && has(Serial.out, "Cache: saving test failed"));
+    fakesd::failWrites = false;
+    CHECK(!cache::save("a-very-long-record-name-that-does-not-fit", 1, rec, now));
+    CHECK(cache::load("test", 1, out, t) && out.a == 7); // the failed save left the old record
+
+    // a big record (the sun image: 8 + 200 x 200 x 2 bytes) in one piece
+    {
+        const size_t n = 8 + 200 * 200 * 2;
+        std::vector<uint8_t> img(n), back(n, 0);
+        for (size_t i = 0; i < n; i++) img[i] = (uint8_t)(i * 7 + (i >> 8));
+        CHECK(cache::saveRaw("sunimg", 1, img.data(), n, now - 1800));
+        CHECK(fakesd::files["/powerwall/cache/sunimg.bin"].size() == n + 28);
+        CHECK(cache::loadRaw("sunimg", 1, back.data(), n, t) && back == img && t == now - 1800);
+        CHECK(!cache::loadRaw("sunimg", 1, back.data(), n - 2, t)); // size mismatch
+    }
+
+    // restoreInto: publishes with fetchedMs rebuilt from the age, returns the fetch time
+    {
+        Serial.clear();
+        const CacheRecPub p = {99, 0};
+        CHECK(cache::save("pub", 4, p, now - 120));
+        g_hostMillis = 50000;
+        FakeShared sh;
+        const time_t got = cache::restoreInto("pub", 4, sh, &CacheRecPub::fetchedMs);
+        const uint32_t ageMs = (uint32_t)(g_hostMillis - sh.v.fetchedMs);
+        CHECK(got == now - 120 && sh.sets == 1 && sh.v.v == 99);
+        CHECK(ageMs >= 120000 && ageMs <= 122000); // the host clock may tick meanwhile
+        FakeShared none;
+        CHECK(cache::restoreInto("nothing", 4, none, &CacheRecPub::fetchedMs) == 0 && none.sets == 0);
+        CHECK(cache::restoreInto("pub", 5, none, &CacheRecPub::fetchedMs) == 0 && none.sets == 0); // old version
+        fakesd::present = false;
+        CHECK(cache::restoreInto("pub", 4, none, &CacheRecPub::fetchedMs) == 0 && none.sets == 0);
+        fakesd::present = true;
+    }
+
+    // a swapped card has no cache directory: the next save creates it again
+    fakesd::reset();
+    CHECK(cache::save("test", 1, rec, now - 1) && cache::load("test", 1, out, t));
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
     testReadLoop();
     testTime();
     testEnso();
+    testCacheHelpers();
+    testCacheIo();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }

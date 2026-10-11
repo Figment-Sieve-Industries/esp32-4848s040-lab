@@ -1,9 +1,11 @@
 // Aurora (AuroraWatch UK), Kp (NOAA SWPC) and moonrise/moonset (MET Norway) - see sky.h.
 // Called from the network task in powerwall.cpp, which schedules them (one TLS session at a time).
 // Each fetch reads its body into a PSRAM buffer through a net::Session (HTTP/1.0, so no chunked
-// bodies) and swaps the result in only when the response parses completely.
+// bodies) and swaps the result in only when the response parses completely. Each successful fetch is
+// also saved to the SD cache (cache.h) and brought back after a reboot by skyRestore*().
 #include "sky.h"
 #include "ca_certs.h"
+#include "cache.h"
 #include "mem_util.h"
 #include "net_http.h"
 #include "powerwall.h"
@@ -16,6 +18,10 @@
 namespace {
 
 constexpr size_t BODY_BUF = 32 * 1024; // the largest body (Kp, the AuroraWatch activity XML) is a few KB
+// SD cache record names (cache.h; the same as the job names in powerwall.cpp)
+constexpr const char *AURORA_REC = "aurora";
+constexpr const char *KP_REC = "kp";
+constexpr const char *MOON_REC = "moon";
 
 Shared<AuroraData> s_aurora;
 Shared<KpData> s_kp;
@@ -154,6 +160,7 @@ bool skyFetchAurora() {
     a.fetchedMs = millis();
     s_aurora.set(a);
     Serial.printf("Sky: aurora %s, last hour %.1f nT\n", auroraLevelName(a.level), a.activityNt[a.count - 1]);
+    cache::save(AURORA_REC, AURORA_CACHE_VERSION, a, time(nullptr));
     return true;
 }
 
@@ -210,6 +217,7 @@ bool skyFetchKp() {
     k.fetchedMs = millis();
     s_kp.set(k);
     Serial.printf("Sky: Kp now %.2f, %d slots\n", k.nowKp, filled);
+    cache::save(KP_REC, KP_CACHE_VERSION, k, time(nullptr));
     return true;
 }
 
@@ -258,6 +266,7 @@ bool skyFetchMoon() {
     s_moon.set(m);
     Serial.printf("Sky: moonrise %s, moonset %s\n", (const char *)(p["moonrise"]["time"] | "--"),
                   (const char *)(p["moonset"]["time"] | "--"));
+    cache::save(MOON_REC, MOON_CACHE_VERSION, m, time(nullptr));
     return true;
 }
 
@@ -266,3 +275,11 @@ AuroraData auroraData() { return s_aurora.get(); }
 KpData kpData() { return s_kp.get(); }
 
 MoonTimes moonTimes() { return s_moon.get(); }
+
+time_t skyRestoreAurora() {
+    return cache::restoreInto(AURORA_REC, AURORA_CACHE_VERSION, s_aurora, &AuroraData::fetchedMs);
+}
+
+time_t skyRestoreKp() { return cache::restoreInto(KP_REC, KP_CACHE_VERSION, s_kp, &KpData::fetchedMs); }
+
+time_t skyRestoreMoon() { return cache::restoreInto(MOON_REC, MOON_CACHE_VERSION, s_moon, &MoonTimes::fetchedMs); }

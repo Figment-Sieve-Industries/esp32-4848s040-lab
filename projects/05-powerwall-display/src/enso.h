@@ -36,6 +36,9 @@ struct EnsoData {
     uint32_t fetchedMs = 0;
 };
 
+// SD cache record version (cache.h). Bump when a field's meaning or units change; a size change is caught anyway.
+constexpr uint16_t ENSO_CACHE_VERSION = 1;
+
 EnsoData ensoData();
 
 constexpr uint32_t ENSO_STALE_MS = 3UL * 24UL * 60UL * 60UL * 1000UL; // 3 days
@@ -43,3 +46,5 @@ constexpr uint32_t ENSO_STALE_MS = 3UL * 24UL * 60UL * 60UL * 1000UL; // 3 days
 // Called only by the network task (one TLS session at a time). One keep-alive connection for all files;
 // returns false (data still swapped in) when a part failed or the job's time budget ran out.
 bool ensoFetch();
+// Restore the last fully fetched record from the SD cache; returns its fetch time (UTC), 0 = nothing restored.
+time_t ensoRestore();
