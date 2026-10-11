@@ -30,6 +30,10 @@ struct SunData {
     uint32_t fetchedMs = 0;                  // millis() of the last successful fetch
 };
 
+// SD cache record versions (cache.h). Bump when a field's meaning or units change; a size change is caught anyway.
+constexpr uint16_t SWPC_CACHE_VERSION = 1;
+constexpr uint16_t SUN_IMG_CACHE_VERSION = 1; // takenAt + the tinted SUN_IMG_PX square (space.cpp)
+
 SunData sunData();
 
 // Sun photo (SOHO HMI intensitygram, 512x512 JPEG) decoded, downscaled and tinted into a
@@ -49,3 +53,6 @@ constexpr uint32_t SPACE_STALE_MS = 2UL * 60UL * 60UL * 1000UL; // 2 h (fetched 
 // ---- Fetchers, called only by the network task in powerwall.cpp (one TLS session at a time) ----
 bool spaceFetchSwpc();    // the four SWPC JSON files + daily indices, one keep-alive connection; ~20 KB
 bool spaceFetchSunImage(); // SOHO JPEG (~70-100 KB into PSRAM) -> decode -> swap
+// Restore the last saved record from the SD cache; returns its fetch time (UTC), 0 = nothing restored.
+time_t spaceRestoreSwpc();
+time_t spaceRestoreSunImage(); // into the back buffer, then swapped in like a fetch

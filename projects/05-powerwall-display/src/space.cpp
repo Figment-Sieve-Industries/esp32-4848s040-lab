@@ -1,8 +1,10 @@
 // Space weather (NOAA SWPC) and the SOHO HMI sun picture - see space.h and docs/11.
 // Called from the network task in powerwall.cpp (core 0), which serialises TLS sessions.
-// Results are swapped in under a lock only at the end of each fetch.
+// Results are swapped in under a lock only at the end of each fetch. Each successful fetch is also saved
+// to the SD cache (cache.h) and brought back after a reboot by spaceRestore*().
 #include "space.h"
 #include "ca_certs.h"
+#include "cache.h"
 #include "mem_util.h"
 #include "net_http.h"
 #include "powerwall.h"
@@ -30,13 +32,22 @@ constexpr float DISC_CX = 0.500F;
 constexpr float DISC_CY = 0.499F;
 constexpr float DISC_R = 0.4635F;
 
+// SD cache record names (cache.h; the same as the job names in powerwall.cpp)
+constexpr const char *SWPC_REC = "swpc";
+constexpr const char *SUN_IMG_REC = "sunimg";
+
+// One sun image buffer. Also the SD cache record (SUN_IMG_CACHE_VERSION), saved and loaded as it is.
+struct SunImage {
+    int64_t takenAt;          // the JPEG's Last-Modified (UTC), 0 unknown
+    uint16_t px[IMG_PIXELS];  // RGB565, tinted (tintImage)
+};
+
 Shared<SunData> s_sun;
-// Sun image double buffer: the front index, version and time change together under s_imgLock
+// Sun image double buffer: the front index and version change together under s_imgLock
 Mutex s_imgLock;
-uint16_t *s_img[2] = {nullptr, nullptr};
+SunImage *s_img[2] = {nullptr, nullptr};
 int s_front = -1;
 uint32_t s_version = 0;
-time_t s_takenAt = 0;
 
 // ---------------------------------------------------------------------------------------------
 // SWPC parsing
@@ -321,11 +332,23 @@ int jdOut(JDEC *jd, void *bitmap, JRECT *rect) {
 bool ensureImageBuffers() {
     if (s_img[0] && s_img[1]) return true;
     for (auto &b : s_img) {
-        if (!b) b = static_cast<uint16_t *>(psramAlloc(IMG_PIXELS * sizeof(uint16_t)));
+        if (!b) b = static_cast<SunImage *>(psramAlloc(sizeof(SunImage)));
     }
     if (s_img[0] && s_img[1]) return true;
     Serial.println("Space: no PSRAM for the sun image");
     return false;
+}
+
+// The buffer a new image goes into (the screen may still be showing the front one)
+int backIndex() {
+    LockGuard g(s_imgLock);
+    return s_front == 0 ? 1 : 0;
+}
+
+void swapIn(int back) {
+    LockGuard g(s_imgLock);
+    s_front = back;
+    s_version++;
 }
 
 // Tint the averaged luminance in img (SUN_IMG_PX^2) into RGB565 in place: black outside the solar
@@ -392,8 +415,12 @@ SunData sunData() { return s_sun.get(); }
 const uint16_t *sunImage(uint32_t &version, time_t &takenAt) {
     LockGuard g(s_imgLock);
     version = s_version;
-    takenAt = s_takenAt;
-    return s_front >= 0 ? s_img[s_front] : nullptr;
+    if (s_front < 0) {
+        takenAt = 0;
+        return nullptr;
+    }
+    takenAt = (time_t)s_img[s_front]->takenAt;
+    return s_img[s_front]->px;
 }
 
 bool spaceFetchSwpc() {
@@ -447,6 +474,7 @@ bool spaceFetchSwpc() {
     if (d.bzValid) snprintf(bz, sizeof(bz), "%+.1f", (double)d.bzNt);
     Serial.printf("Space: flare %s (max %s), R%d S%d G%d, wind %s km/s, Bz %s, SSN %d\n", d.flareNow, d.flareMax,
                   d.scaleR, d.scaleS, d.scaleG, wind, bz, d.sunspots);
+    cache::save(SWPC_REC, SWPC_CACHE_VERSION, d, time(nullptr));
     return true;
 }
 
@@ -517,26 +545,31 @@ bool spaceFetchSunImage() {
     c->bandSum = bandMem.as<uint16_t>();
     c->bandCnt = bandMem.as<uint8_t>() + (size_t)c->bandRows * SUN_IMG_PX * sizeof(uint16_t);
 
-    int back;
-    {
-        LockGuard g(s_imgLock);
-        back = s_front == 0 ? 1 : 0; // the screen may still be showing the front buffer
-    }
-    c->out = s_img[back];
+    const int back = backIndex();
+    SunImage &img = *s_img[back];
+    c->out = img.px;
     jr = jd_decomp(&c->jd, jdOut, 0);
     if (jr != JDR_OK) {
         Serial.printf("Space: sun JPEG decode failed (%d)\n", (int)jr);
         return false;
     }
     flushRows(c, SUN_IMG_PX);
-    tintImage(s_img[back]);
+    tintImage(img.px);
+    img.takenAt = takenAt;
     const uint32_t ms = millis() - t0;
-    {
-        LockGuard g(s_imgLock);
-        s_front = back;
-        s_version++;
-        s_takenAt = takenAt;
-    }
+    swapIn(back);
     Serial.printf("Space: sun image %u B, decoded in %lu ms\n", (unsigned)jpgLen, (unsigned long)ms);
+    cache::save(SUN_IMG_REC, SUN_IMG_CACHE_VERSION, img, time(nullptr)); // the front buffer: only read from here on
     return true;
+}
+
+time_t spaceRestoreSwpc() { return cache::restoreInto(SWPC_REC, SWPC_CACHE_VERSION, s_sun, &SunData::fetchedMs); }
+
+time_t spaceRestoreSunImage() {
+    if (!ensureImageBuffers()) return 0;
+    const int back = backIndex();
+    time_t utc = 0;
+    if (!cache::load(SUN_IMG_REC, SUN_IMG_CACHE_VERSION, *s_img[back], utc)) return 0;
+    swapIn(back);
+    return utc;
 }

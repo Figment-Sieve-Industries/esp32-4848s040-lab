@@ -76,6 +76,8 @@ struct WeatherData {
     WeatherHour hours[6];       // now, +2 h ... +10 h
     uint32_t updatedMs = 0;
 };
+// SD cache record version (cache.h). Bump when a field's meaning or units change; a size change is caught anyway.
+constexpr uint16_t WEATHER_CACHE_VERSION = 1;
 
 struct NetStatus {
     bool wifiUp = false;

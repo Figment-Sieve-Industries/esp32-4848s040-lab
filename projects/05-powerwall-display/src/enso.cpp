@@ -3,7 +3,8 @@
 //   ensodisc.shtml (whole page, streamed through a tag stripper; the odds and the next-update date sit
 //   beyond byte 8192), then the tails of wksst9120.for, sstoi.indices, oni.ascii.txt and RONI.ascii.txt.
 // Results are merged into a copy of the current data and swapped in under the lock, so a part that fails
-// to download or parse keeps its previous value. The parsers are plain C++ (no Arduino types) and are
+// to download or parse keeps its previous value. A complete fetch is also saved to the SD cache (cache.h)
+// and brought back after a reboot by ensoRestore(). The parsers are plain C++ (no Arduino types) and are
 // tested on real payloads on the host (hosttest/, builds this file with -DENSO_HOST_TEST, which
 // compiles the Arduino half out).
 #include "enso.h"
@@ -15,6 +16,7 @@
 
 #ifndef ENSO_HOST_TEST
 #include "ca_certs.h"
+#include "cache.h"
 #include "net_http.h"
 #include "powerwall.h"
 #include "shared_state.h"
@@ -591,6 +593,7 @@ constexpr const char *CPC_BASE = "https://www.cpc.ncep.noaa.gov";
 constexpr size_t WORK_BYTES = 8192;        // one PSRAM buffer: discussion text, or a file tail
 constexpr size_t TAIL_BYTES = 2304;        // largest tail we keep (24 sstoi rows of ~73 bytes + a partial line)
 constexpr size_t MAX_BODY_BYTES = 262144;  // abort if a server ignores Range on the 148 KB weekly file and keeps going
+constexpr const char *ENSO_REC = "enso";   // SD cache record name (cache.h; the job name in powerwall.cpp)
 
 Shared<EnsoData> s_enso;
 
@@ -717,7 +720,11 @@ bool ensoFetch() {
                   d.alertText[0] ? d.alertText : "?", (double)d.weeklyAnom, d.weeklyDate, d.oniSeason, (double)d.oni,
                   d.roniSeason, (double)d.roni, odds[0] ? odds : "?", d.probWhat[0] ? " for " : "", d.probWhat,
                   d.nextUpdate[0] ? d.nextUpdate : "?", ok ? "" : " (partial)");
+    // Only complete fetches: a cached record's time defers the next fetch by a full period after a reboot
+    if (ok) cache::save(ENSO_REC, ENSO_CACHE_VERSION, d, time(nullptr));
     return ok;
 }
+
+time_t ensoRestore() { return cache::restoreInto(ENSO_REC, ENSO_CACHE_VERSION, s_enso, &EnsoData::fetchedMs); }
 
 #endif // !ENSO_HOST_TEST

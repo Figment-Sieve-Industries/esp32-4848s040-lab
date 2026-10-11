@@ -48,6 +48,11 @@ struct MoonTimes {
     uint32_t fetchedMs = 0;
 };
 
+// SD cache record versions (cache.h). Bump when a field's meaning or units change; a size change is caught anyway.
+constexpr uint16_t AURORA_CACHE_VERSION = 1;
+constexpr uint16_t KP_CACHE_VERSION = 1;
+constexpr uint16_t MOON_CACHE_VERSION = 1;
+
 AuroraData auroraData();
 KpData kpData();
 MoonTimes moonTimes();
@@ -61,3 +66,7 @@ bool skyFetchAurora();
 bool skyFetchKp();
 bool skyFetchMoon();
 bool skyMoonNeeded(); // no moonrise/moonset for today's local date yet
+// Restore the last saved record from the SD cache; returns its fetch time (UTC), 0 = nothing restored.
+time_t skyRestoreAurora();
+time_t skyRestoreKp();
+time_t skyRestoreMoon();
