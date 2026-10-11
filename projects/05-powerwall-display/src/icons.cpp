@@ -1,4 +1,5 @@
 #include "icons.h"
+#include "ui_common.h"
 #include <initializer_list>
 #include <math.h>
 
@@ -18,11 +19,8 @@ struct FP {
     float x, y;
 };
 
-// Icon parts must never swallow taps: the screen handles them (brightness tap).
-void inert(lv_obj_t *o) {
-    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange): LVGL flags are a bit-mask enum
-    lv_obj_remove_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
-}
+// Icon parts are never clickable or scrollable, so swipes reach the screen's gesture handler.
+using ui::inert;
 
 lv_obj_t *polyline(const Ctx &c, std::initializer_list<FP> pts, float dx = 0, float dy = 0) {
     auto *buf = (lv_point_precise_t *)lv_malloc(sizeof(lv_point_precise_t) * pts.size());
@@ -135,8 +133,7 @@ void draw(lv_obj_t *cont, Icon icon, lv_color_t color, float stroke) {
     case Icon::Battery: {
         rect(c, 2.5f, 7, 17, 10, 2, false);
         polyline(c, {{22, 10.5f}, {22, 13.5f}});
-        lv_obj_t *fill = rect(c, 5, 9.5f, 12, 5, 1, true);
-        lv_obj_set_user_data(cont, fill); // for iconSetBatteryLevel
+        rect(c, 5, 9.5f, 12, 5, 1, true);
         break;
     }
     case Icon::Drop:
@@ -260,14 +257,6 @@ void iconAnimate(lv_obj_t *container, Icon icon) {
         lv_obj_t *ch = lv_obj_get_child(container, i);
         if (lv_obj_has_flag(ch, LV_OBJ_FLAG_USER_1)) loopAnim(ch, fall, 0, 100, 1400, false, 450 * k++);
     }
-}
-
-void iconSetBatteryLevel(lv_obj_t *container, float pct) {
-    auto *fill = (lv_obj_t *)lv_obj_get_user_data(container);
-    if (!fill) return;
-    float s = lv_obj_get_style_width(container, LV_PART_MAIN) / 24.0f;
-    int w = (int)lroundf(12 * s * fmaxf(0.0f, fminf(pct, 100.0f)) / 100.0f);
-    if (lv_obj_get_style_width(fill, LV_PART_MAIN) != w) lv_obj_set_width(fill, w < 1 ? 1 : w);
 }
 
 Icon weatherIcon(int code, bool isDay) {

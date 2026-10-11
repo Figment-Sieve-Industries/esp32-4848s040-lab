@@ -12,8 +12,8 @@ extern const lv_color_t C_SOLAR, C_GRID, C_HOME, C_BATT, C_ALERT, C_ALERT_BG, C_
 // Mains voltage normal range (230 V nominal, 207-253 V)
 constexpr float MAINS_V_MIN = 207.0f, MAINS_V_MAX = 253.0f;
 
-// 0 = house (N/O), 1 = today (G), 2 = battery & grid (H), 3 = weather (I), 4 = moon (P),
-// 5 = aurora (Q), 6 = sun (R), 7 = El Nino (S), 8 = settings, 9 = about
+// 0 = house, 1 = today, 2 = battery & grid, 3 = weather, 4 = moon,
+// 5 = aurora, 6 = sun, 7 = El Nino, 8 = settings, 9 = about
 constexpr int SCREEN_COUNT = 10;
 enum ScreenIndex {
     SCR_HOUSE, SCR_TODAY, SCR_HEALTH, SCR_WEATHER, SCR_MOON, SCR_AURORA, SCR_SUN, SCR_ENSO, SCR_SETTINGS, SCR_ABOUT
@@ -110,6 +110,11 @@ void formatKWh(char *buf, size_t n, double kwh, bool withUnit); // overload: "18
 // Fade-in for a list of objects: first after firstDelayMs, then stepMs apart. Main starts onShow
 // after the screen slide finishes, so these never overlap the slide.
 void fadeIn(lv_obj_t *const *objs, int n, uint32_t firstDelayMs, uint32_t stepMs);
+// Extra delay added to every entry animation (animFadeIn, animValue, fadeIn, barChartGrow) started
+// while set. main sets it to the slide time around onShow(), so the animations start with the
+// elements already at their start state but only begin after the 300 ms slide (no pop, no overlap).
+void setShowDelay(uint32_t ms);
+uint32_t showDelay();
 
 // Skip work when the inputs haven't changed (K needs ==)
 template <class K> struct ChangeGate {
