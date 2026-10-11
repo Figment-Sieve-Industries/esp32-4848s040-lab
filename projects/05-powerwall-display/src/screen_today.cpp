@@ -2,11 +2,12 @@
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
-#include <time.h>
 #include "screens.h"
 #include "ui_common.h"
+#include "ui_chart.h"
 #include "icons.h"
 #include "energy.h"
+#include "time_util.h"
 
 namespace {
 
@@ -17,9 +18,10 @@ constexpr int BAR_AREA_H = 56;
 constexpr int BAR_MAX_H = 52;
 constexpr int BAR_MIN_H = 3;
 constexpr uint32_t GROW_LOCK_MS = 2000;
+constexpr uint32_t PULSE_PERIOD_MS = 2800;
+constexpr lv_opa_t PULSE_LOW_OPA = 90;
 
 lv_obj_t *s_scr = nullptr;
-ui::TopBar s_top;
 lv_obj_t *s_caption = nullptr;
 lv_obj_t *s_ring = nullptr;
 lv_obj_t *s_pct = nullptr;
@@ -30,19 +32,22 @@ lv_obj_t *s_export = nullptr;
 lv_obj_t *s_import = nullptr;
 lv_obj_t *s_rows[3] = {};
 lv_obj_t *s_tiles[2] = {};
-lv_obj_t *s_bars[BAR_COUNT] = {};
+lv_obj_t *s_chart = nullptr;
+int s_barH[BAR_COUNT] = {};          // current bar heights / colours (kept to re-set one bar for the pulse)
+lv_color_t s_barCol[BAR_COUNT] = {};
 
 uint32_t s_lockUntil = 0;     // millis() until which refresh leaves heights/arc alone
 bool s_locked = false;
 int s_pulseHour = -1;
+lv_opa_t s_pulseOpa = LV_OPA_COVER;
 
 void setArcValueCb(void *var, int32_t v) { lv_arc_set_value(static_cast<lv_obj_t *>(var), v); }
-void setHeightCb(void *var, int32_t v) { lv_obj_set_height(static_cast<lv_obj_t *>(var), v); }
 
-void kwhText(char *buf, size_t n, double kwh) {
-    char num[24];
-    ui::formatKWh(num, sizeof(num), kwh);
-    snprintf(buf, n, "%s kWh", num);
+// Bars are bottom-aligned in the chart; the pulsing bar carries the pulse opacity.
+void setBar(int i, int h, lv_color_t col) {
+    s_barH[i] = h;
+    s_barCol[i] = col;
+    ui::barChartSet(s_chart, i, BAR_AREA_H - h, h, col, i == s_pulseHour ? s_pulseOpa : LV_OPA_COVER);
 }
 
 // One right-column row: icon + small label over a value. Returns the row; value label via out.
@@ -52,10 +57,8 @@ lv_obj_t *makeRow(lv_obj_t *parent, int y, Icon icon, lv_color_t col, const char
     lv_obj_set_size(row, 240, 40);
     lv_obj_t *ic = iconCreate(row, icon, 26, col);
     lv_obj_set_pos(ic, 0, 7);
-    lv_obj_t *t = ui::label(row, &lv_font_montserrat_12, ui::MUTED, title);
-    lv_obj_set_pos(t, 38, 0);
-    *value = ui::label(row, &lv_font_montserrat_22, ui::TEXT, "--");
-    lv_obj_set_pos(*value, 38, 14);
+    ui::labelAt(row, &lv_font_montserrat_12, ui::MUTED, title, 38, 0);
+    *value = ui::labelAt(row, &lv_font_montserrat_22, ui::TEXT, "--", 38, 14);
     return row;
 }
 
@@ -63,10 +66,8 @@ lv_obj_t *makeTile(lv_obj_t *parent, int x, Icon icon, const char *title, lv_obj
     lv_obj_t *c = ui::card(parent, x, 266, 210, 58);
     lv_obj_t *ic = iconCreate(c, icon, 22, ui::C_GRID);
     lv_obj_set_pos(ic, 14, 18);
-    lv_obj_t *t = ui::label(c, &lv_font_montserrat_12, ui::MUTED, title);
-    lv_obj_set_pos(t, 46, 8);
-    *value = ui::label(c, &lv_font_montserrat_20, ui::TEXT, "--");
-    lv_obj_set_pos(*value, 46, 24);
+    ui::labelAt(c, &lv_font_montserrat_12, ui::MUTED, title, 46, 8);
+    *value = ui::labelAt(c, &lv_font_montserrat_20, ui::TEXT, "--", 46, 24);
     return c;
 }
 
@@ -95,33 +96,53 @@ int ringValue(const TodayStats &st) {
     return v < 0 ? 0 : (v > 100 ? 100 : v);
 }
 
+// Current-hour bar pulse: an anim on the chart object that changes that one bar's opacity.
+void pulseExec(void *, int32_t v) {
+    if (s_pulseHour < 0) return;
+    s_pulseOpa = static_cast<lv_opa_t>(v);
+    setBar(s_pulseHour, s_barH[s_pulseHour], s_barCol[s_pulseHour]);
+}
+
+void pulseStart() {
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_chart);
+    lv_anim_set_exec_cb(&a, pulseExec);
+    lv_anim_set_values(&a, LV_OPA_COVER, PULSE_LOW_OPA);
+    lv_anim_set_duration(&a, PULSE_PERIOD_MS / 2);
+    lv_anim_set_playback_duration(&a, PULSE_PERIOD_MS / 2);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+}
+
 void updatePulse(const TodayStats &st) {
     int h = (st.valid && st.currentHour >= 0 && st.currentHour < BAR_COUNT) ? st.currentHour : -1;
     if (h == s_pulseHour) return;
     if (s_pulseHour >= 0) {
-        lv_anim_delete(s_bars[s_pulseHour], nullptr);
-        lv_obj_set_style_bg_opa(s_bars[s_pulseHour], LV_OPA_COVER, 0);
+        int old = s_pulseHour;
+        lv_anim_delete(s_chart, pulseExec);
+        s_pulseHour = -1;
+        s_pulseOpa = LV_OPA_COVER;
+        setBar(old, s_barH[old], s_barCol[old]);
     }
     s_pulseHour = h;
-    if (h >= 0) ui::animPulse(s_bars[h], 2800);
+    if (h >= 0) pulseStart();
 }
 
 void updateTexts(const TodayStats &st) {
     char buf[40], a[24], b[24];
 
     if (st.partial && st.since > 0) {
-        struct tm tmv;
-        time_t t = st.since;
-        localtime_r(&t, &tmv);
-        snprintf(buf, sizeof(buf), "TODAY SINCE %02d:%02d", tmv.tm_hour, tmv.tm_min);
+        char hhmm[8];
+        tu::fmtHHMM(hhmm, sizeof(hhmm), st.since);
+        ui::setTextF(s_caption, "TODAY SINCE %s", hhmm);
     } else {
-        snprintf(buf, sizeof(buf), "TODAY SO FAR");
+        ui::setText(s_caption, "TODAY SO FAR");
     }
-    ui::setText(s_caption, buf);
 
-    if (st.valid && st.selfPoweredPct >= 0) snprintf(buf, sizeof(buf), "%d%%", ringValue(st));
-    else snprintf(buf, sizeof(buf), "--");
-    ui::setText(s_pct, buf);
+    if (st.valid && st.selfPoweredPct >= 0) ui::setTextF(s_pct, "%d%%", ringValue(st));
+    else ui::setText(s_pct, "--");
 
     if (!st.valid) {
         ui::setText(s_solar, "--");
@@ -131,33 +152,29 @@ void updateTexts(const TodayStats &st) {
         ui::setText(s_import, "--");
         return;
     }
-    kwhText(buf, sizeof(buf), st.solarKWh);
+    ui::formatKWh(buf, sizeof(buf), st.solarKWh, true);
     ui::setText(s_solar, buf);
-    kwhText(buf, sizeof(buf), st.homeKWh);
+    ui::formatKWh(buf, sizeof(buf), st.homeKWh, true);
     ui::setText(s_home, buf);
-    ui::formatKWh(a, sizeof(a), st.battInKWh);
-    ui::formatKWh(b, sizeof(b), st.battOutKWh);
-    snprintf(buf, sizeof(buf), "%s / %s kWh", a, b);
-    ui::setText(s_batt, buf);
-    kwhText(buf, sizeof(buf), st.exportKWh);
+    ui::formatKWh(a, sizeof(a), st.battInKWh, false);
+    ui::formatKWh(b, sizeof(b), st.battOutKWh, false);
+    ui::setTextF(s_batt, "%s / %s kWh", a, b);
+    ui::formatKWh(buf, sizeof(buf), st.exportKWh, true);
     ui::setText(s_export, buf);
-    kwhText(buf, sizeof(buf), st.importKWh);
+    ui::formatKWh(buf, sizeof(buf), st.importKWh, true);
     ui::setText(s_import, buf);
 }
 
 void updateBars(const TodayStats &st) {
     float scale = barScale(st);
-    for (int i = 0; i < BAR_COUNT; i++) {
-        ui::setBgColor(s_bars[i], barHasData(st, i) ? ui::C_SOLAR : ui::TRACK);
-        ui::setHeight(s_bars[i], barTarget(st, i, scale));
-    }
+    for (int i = 0; i < BAR_COUNT; i++)
+        setBar(i, barTarget(st, i, scale), barHasData(st, i) ? ui::C_SOLAR : ui::TRACK);
 }
 
 } // namespace
 
 lv_obj_t *todayCreate() {
-    s_scr = ui::screenCreate();
-    s_top = ui::topBarCreate(s_scr);
+    s_scr = ui::screenCreate(ui::SCR_TODAY);
 
     s_caption = ui::caption(s_scr, ui::MUTED, "TODAY SO FAR");
     lv_obj_set_pos(s_caption, 24, 56);
@@ -182,14 +199,9 @@ lv_obj_t *todayCreate() {
     lv_obj_set_style_arc_color(s_ring, ui::C_BATT, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(s_ring, false, LV_PART_INDICATOR);
 
-    s_pct = ui::label(s_scr, &lv_font_montserrat_40, ui::TEXT, "--");
-    lv_obj_t *sp = ui::label(s_scr, &lv_font_montserrat_12, ui::MUTED, "self-powered");
-    lv_obj_set_style_text_align(s_pct, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_align(sp, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(s_pct, 120);
-    lv_obj_set_width(sp, 120);
-    lv_obj_set_pos(s_pct, 24 + 84 - 60, 82 + 62);
-    lv_obj_set_pos(sp, 24 + 84 - 60, 82 + 62 + 48);
+    s_pct = ui::labelAt(s_scr, &lv_font_montserrat_40, ui::TEXT, "--", 24 + 84 - 60, 82 + 62, 120, LV_TEXT_ALIGN_CENTER);
+    ui::labelAt(s_scr, &lv_font_montserrat_12, ui::MUTED, "self-powered", 24 + 84 - 60, 82 + 62 + 48, 120,
+                LV_TEXT_ALIGN_CENTER);
 
     // Right column
     s_rows[0] = makeRow(s_scr, 82, Icon::Sun, ui::C_SOLAR, "Solar generated", &s_solar);
@@ -202,31 +214,15 @@ lv_obj_t *todayCreate() {
 
     // Solar by hour
     lv_obj_t *hc = ui::card(s_scr, 24, 342, 432, 96);
-    lv_obj_t *hl = ui::label(hc, &lv_font_montserrat_12, ui::MUTED, "Solar by hour");
-    lv_obj_set_pos(hl, 14, 10);
-    lv_obj_t *hr = ui::label(hc, &lv_font_montserrat_12, ui::MUTED, "00 / 06 / 12 / 18");
-    lv_obj_align(hr, LV_ALIGN_TOP_RIGHT, -14, 10);
+    ui::labelAt(hc, &lv_font_montserrat_12, ui::MUTED, "Solar by hour", 14, 10);
+    ui::labelAt(hc, &lv_font_montserrat_12, ui::MUTED, "00 / 06 / 12 / 18", 14, 10, 404, LV_TEXT_ALIGN_RIGHT);
 
-    lv_obj_t *area = ui::box(hc);
-    lv_obj_set_pos(area, 14, 30);
-    lv_obj_set_size(area, 404, BAR_AREA_H);
-    for (int i = 0; i < BAR_COUNT; i++) {
-        lv_obj_t *b = ui::box(area);
-        lv_obj_set_size(b, BAR_W, BAR_MIN_H);
-        lv_obj_align(b, LV_ALIGN_BOTTOM_LEFT, i * BAR_STEP, 0);
-        lv_obj_set_style_bg_color(b, ui::TRACK, 0);
-        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(b, 2, 0);
-        s_bars[i] = b;
-    }
-
-    ui::pageDots(s_scr, 1);
+    s_chart = ui::barChartCreate(hc, 14, 30, 404, BAR_AREA_H, BAR_COUNT, BAR_W, BAR_STEP, 2);
+    for (int i = 0; i < BAR_COUNT; i++) setBar(i, BAR_MIN_H, ui::TRACK);
     return s_scr;
 }
 
 void todayRefresh() {
-    if (!s_scr) return;
-    ui::topBarUpdate(s_top);
     TodayStats st = energyToday();
     updateTexts(st);
     updatePulse(st);
@@ -239,7 +235,6 @@ void todayRefresh() {
 }
 
 void todayOnShow() {
-    if (!s_scr) return;
     TodayStats st = energyToday();
     updateTexts(st);
     updatePulse(st);
@@ -251,21 +246,11 @@ void todayOnShow() {
     lv_arc_set_value(s_ring, 0);
     ui::animValue(s_ring, setArcValueCb, 0, ringValue(st), 1200, 150);
 
-    // Bars grow, staggered
-    float scale = barScale(st);
-    for (int i = 0; i < BAR_COUNT; i++) {
-        ui::setBgColor(s_bars[i], barHasData(st, i) ? ui::C_SOLAR : ui::TRACK);
-        lv_obj_set_height(s_bars[i], 0);
-        ui::animValue(s_bars[i], setHeightCb, 0, barTarget(st, i, scale), 500, 300 + i * 30);
-    }
+    // Bars grow from the baseline, staggered
+    updateBars(st);
+    ui::barChartGrow(s_chart, 500, 300, 30);
 
     // Rows and tiles fade in, staggered
-    for (int i = 0; i < 3; i++) {
-        lv_obj_set_style_opa(s_rows[i], LV_OPA_TRANSP, 0);
-        ui::animFadeIn(s_rows[i], 100 + i * 150);
-    }
-    for (int i = 0; i < 2; i++) {
-        lv_obj_set_style_opa(s_tiles[i], LV_OPA_TRANSP, 0);
-        ui::animFadeIn(s_tiles[i], 550 + i * 100);
-    }
+    ui::fadeIn(s_rows, 3, 100, 150);
+    ui::fadeIn(s_tiles, 2, 550, 100);
 }
