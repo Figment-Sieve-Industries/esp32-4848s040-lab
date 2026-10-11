@@ -65,6 +65,7 @@ The first build downloads the toolchain and libraries and takes several minutes.
 | [docs/06-frameworks-and-libraries.md](docs/06-frameworks-and-libraries.md) | Arduino vs ESP-IDF trade-offs; PlatformIO, LVGL, ESPHome |
 | [docs/07-gotchas.md](docs/07-gotchas.md) | Known pitfalls and fixes |
 | [docs/08-power-battery-sleep.md](docs/08-power-battery-sleep.md) | Power tree, battery charger, sleep and wake options |
+| [docs/09-alternative-displays.md](docs/09-alternative-displays.md) | Similar boards, verified UK prices (Oct 2026) |
 | [docs/hardware-log.md](docs/hardware-log.md) | **What has been verified on your board** |
 | [docs/datasheets/](docs/datasheets/) | ST7701S, GT911, NS4168, ESP32-S3, WROOM-1 PDFs |
 | [docs/vendor/](docs/vendor/) | Guition data pack: **schematic**, IO pin sheet, spec, user manual, dimensions |
