@@ -37,6 +37,9 @@ SunData sunData();
 // a new image goes to the back buffer and is then swapped in, so the pointer the screen holds
 // stays valid until the following fetch (an hour later).
 constexpr int SUN_IMG_PX = 200;
+// Pixels at radius >= SUN_IMG_PX / 2 from the centre are painted in the screen background (ui::BG,
+// 0x0B0F14), so the image looks round without an LVGL clip_corner layer.
+constexpr uint16_t SUN_IMG_BG_RGB565 = 0x0862;
 // Front buffer (nullptr until the first image). version changes on every new image.
 const uint16_t *sunImage(uint32_t &version, time_t &takenAt);
 

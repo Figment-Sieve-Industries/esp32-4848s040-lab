@@ -69,4 +69,73 @@ void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint3
 // descendants. Call with pause = true for the screen being left, false for the one shown.
 void pauseScreenAnimations(lv_obj_t *screen, bool pause);
 
+// ---------------- shared helpers (consolidation round) ----------------
+
+// Named palette for colours the screens used as literals (values unchanged)
+extern const lv_color_t C_RED /*E5484D = C_ALERT*/, C_ORANGE /*FF8A3D*/, C_YELLOW /*F5D400*/, C_GREEN /*3DDC84 = C_BATT*/,
+    C_BLUE /*3B82F6*/, C_PURPLE /*B266FF*/, DIM_BAR /*3A4654*/;
+// Severity ramp: 0 green, 1 yellow, 2 orange, >= 3 red (SOC bands, Kp, scales, hints)
+lv_color_t levelColor(int level);
+
+void inert(lv_obj_t *o); // clear CLICKABLE and SCROLLABLE
+// Filled rectangle at x,y (w x h), inert, no border/padding
+lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t bg, int radius = 0);
+// Content-sized flex container (transparent, inert)
+lv_obj_t *flex(lv_obj_t *parent, lv_flex_flow_t flow, int gap, lv_flex_align_t main = LV_FLEX_ALIGN_START,
+               lv_flex_align_t cross = LV_FLEX_ALIGN_CENTER);
+// Row of a big value and a smaller unit, bottom-aligned (unit lifted by unitPadBottom). Returns the row.
+lv_obj_t *valueUnit(lv_obj_t *parent, const lv_font_t *vf, const lv_font_t *uf, lv_obj_t **value, lv_obj_t **unit,
+                    int unitPadBottom);
+// Label at x,y; w > 0 fixes the width (with the given alignment)
+lv_obj_t *labelAt(lv_obj_t *parent, const lv_font_t *f, lv_color_t c, const char *t, int x, int y, int w = 0,
+                  lv_text_align_t align = LV_TEXT_ALIGN_LEFT);
+lv_obj_t *cardCaption(lv_obj_t *card, const char *text, int x = 14, int y = 10); // MUTED caption in a card
+
+// Horizontal track + fill bar
+struct HBar {
+    lv_obj_t *track = nullptr, *fill = nullptr;
+    int w = 0;
+};
+HBar hbar(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t track, lv_color_t fill, int radius);
+void hbarSet(HBar &b, float frac /* <= 0 hides the fill, clamped to 1 */, lv_color_t fill); // change-only
+
+// Change-only printf setters
+void setTextF(lv_obj_t *l, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+// "--" in MUTED when !have; the text in MUTED when stale; else in `ok` colour
+void setValueF(lv_obj_t *l, bool have, bool stale, lv_color_t ok, const char *fmt, ...)
+    __attribute__((format(printf, 5, 6)));
+
+void formatKWh(char *buf, size_t n, double kwh, bool withUnit); // overload: "18.4 kWh"
+
+// Fade-in for a list of objects: first after firstDelayMs, then stepMs apart. Main starts onShow
+// after the screen slide finishes, so these never overlap the slide.
+void fadeIn(lv_obj_t *const *objs, int n, uint32_t firstDelayMs, uint32_t stepMs);
+
+// Skip work when the inputs haven't changed (K needs ==)
+template <class K> struct ChangeGate {
+    K last{};
+    bool have = false;
+    bool changed(const K &k, bool force) {
+        if (!force && have && k == last) return false;
+        last = k;
+        have = true;
+        return true;
+    }
+};
+
+// Status banner card (aurora status / ENSO alert): ring with a glyph on the left, caption, name, sub line
+struct Banner {
+    lv_obj_t *card = nullptr, *ring = nullptr, *cap = nullptr, *name = nullptr, *sub = nullptr;
+};
+Banner bannerCreate(lv_obj_t *scr, int y, int h, const char *caption, int subW = 276);
+// fg = accent (border, ring, caption, name), bg = card background; name switches to `small` when longer
+// than bigMaxLen; dim mutes everything (stale).
+void bannerSet(Banner &b, lv_color_t fg, lv_color_t bg, const char *name, bool dim, const char *sub, size_t bigMaxLen,
+               const lv_font_t *big, const lv_font_t *small);
+
+// Screen registry: screenCreate(index) = screenCreate() + top bar + page dots for that index. The top
+// bar is then updated centrally by main (topBarUpdateFor(current)); screens don't keep a TopBar.
+lv_obj_t *screenCreate(int index);
+void topBarUpdateFor(int index);
+
 } // namespace ui
