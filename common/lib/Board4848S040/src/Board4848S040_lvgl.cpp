@@ -8,9 +8,29 @@ static Touch *s_touch;
 
 static uint32_t tickCb() { return millis(); }
 
+// Rotation 3 (USB-C at the bottom): logical pixel (x, y) lives at framebuffer row W-1-x, column y.
+// Arduino_GFX's rotated draw writes the strip column-wise (each pixel on a different 960-byte row, so
+// the PSRAM cache thrashes) and then writes back every full framebuffer row it touched: ~460 KB for a
+// 480x48 strip that only changed 46 KB. Here each framebuffer row gets one contiguous segment, and only
+// that segment is written back. Measured on project 05: see docs/hardware-log.md.
+static void flushRot3(const lv_area_t *area, const uint16_t *px) {
+    const int32_t w = lv_area_get_width(area), h = lv_area_get_height(area);
+    uint16_t *fb = s_gfx->getFramebuffer();
+    for (int32_t i = 0; i < w; i++) {
+        uint16_t *dst = fb + (size_t)(B4848_LCD_WIDTH - 1 - (area->x1 + i)) * B4848_LCD_WIDTH + area->y1;
+        const uint16_t *src = px + i;
+        for (int32_t j = 0; j < h; j++, src += w) dst[j] = *src;
+        Cache_WriteBack_Addr((uint32_t)dst, (uint32_t)h * 2);
+    }
+}
+
 static void flushCb(lv_display_t *disp, const lv_area_t *area, uint8_t *px) {
-    s_gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)px,
-                              lv_area_get_width(area), lv_area_get_height(area));
+    if (s_gfx->getRotation() == 3 && area->x1 >= 0 && area->y1 >= 0 && area->x2 < B4848_LCD_WIDTH &&
+        area->y2 < B4848_LCD_HEIGHT) {
+        flushRot3(area, (const uint16_t *)px);
+    } else {
+        s_gfx->draw16bitRGBBitmap(area->x1, area->y1, (uint16_t *)px, lv_area_get_width(area), lv_area_get_height(area));
+    }
     lv_display_flush_ready(disp);
 }
 
