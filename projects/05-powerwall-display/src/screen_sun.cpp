@@ -277,14 +277,14 @@ lv_obj_t *sunCreate() {
     static const char *const SC_LABEL[3] = {"Radio", "Radiation", "Geomagnetic"};
     for (int i = 0; i < 3; i++) {
         s_chip[i] = ui::card(scr, 24 + i * 147, 260, 138, 44);
-        s_chipBadge[i] = ui::rect(s_chip[i], 8, 7, 40, 30, ui::TRACK, 8);
+        s_chipBadge[i] = ui::rect(s_chip[i], 7, 7, 36, 30, ui::TRACK, 8);
         lv_obj_set_style_border_width(s_chipBadge[i], 2, 0);
         lv_obj_set_style_border_color(s_chipBadge[i], ui::TRACK, 0);
         lv_obj_set_style_bg_opa(s_chipBadge[i], LV_OPA_TRANSP, 0);
         s_chipK[i] = ui::label(s_chipBadge[i], &lv_font_montserrat_16, ui::MUTED, "--");
         lv_obj_center(s_chipK[i]);
-        ui::labelAt(s_chip[i], &lv_font_montserrat_12, ui::MUTED, SC_LABEL[i], 56, 6);
-        s_chipName[i] = ui::labelAt(s_chip[i], &lv_font_montserrat_14, ui::MUTED, "--", 56, 21);
+        ui::labelAt(s_chip[i], &lv_font_montserrat_12, ui::MUTED, SC_LABEL[i], 50, 6); // "Geomagnetic" needs x <= 50
+        s_chipName[i] = ui::labelAt(s_chip[i], &lv_font_montserrat_14, ui::MUTED, "--", 50, 21);
     }
 
     // ---- Solar wind ----

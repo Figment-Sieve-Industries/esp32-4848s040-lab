@@ -23,6 +23,7 @@ struct Bar {
 
 struct Chart {
     int count, barW, step, radius;
+    int h;                  // chart height as created (coords aren't valid until LVGL's first layout pass)
     int32_t growT;          // ms into the grow timeline
     uint32_t growMs, growStagger;
     bool growing;
@@ -133,6 +134,7 @@ lv_obj_t *barChartCreate(lv_obj_t *parent, int x, int y, int w, int h, int count
     auto *s = static_cast<Chart *>(lv_malloc_zeroed(sizeof(Chart) + sizeof(Bar) * static_cast<size_t>(count)));
     if (!s) return c; // out of LVGL heap: an empty, inert object (all setters tolerate it)
     s->count = count;
+    s->h = h;
     s->barW = barW;
     s->step = step;
     s->radius = radius;
@@ -178,10 +180,9 @@ void barChartSetNewest(lv_obj_t *chart, int n, const int16_t *heights, const lv_
     for (int i = 0; i < first; i++) barChartSet(chart, i, 0, 0, lv_color_black()); // hidden: the colour is unused
     if (used <= 0) return;
     if (!heights || !colors) return; // caller bug: the slots stay hidden
-    int32_t ch = lv_obj_get_height(chart);
     for (int k = 0; k < used; k++) {
         int h = heights[skip + k];
-        barChartSet(chart, first + k, static_cast<int>(ch) - h, h, colors[skip + k]);
+        barChartSet(chart, first + k, s->h - h, h, colors[skip + k]);
     }
 }
 

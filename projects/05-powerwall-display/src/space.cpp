@@ -85,7 +85,8 @@ bool parseFlares(const char *buf, size_t len, SunData &d) {
     }
     JsonVariantConst e = doc[0];
     const char *cur = e["current_class"] | "";
-    if (!*cur) return false;
+    // "A0.0" is what SWPC reports during a GOES data gap (zero flux): no reading, keep the last class
+    if (!*cur || strcmp(cur, "A0.0") == 0) return false;
     copyStr(d.flareNow, sizeof(d.flareNow), cur);
     copyStr(d.flareMax, sizeof(d.flareMax), e["max_class"] | "");
     d.flareMaxAt = tu::parseIso8601(e["max_time"] | "");

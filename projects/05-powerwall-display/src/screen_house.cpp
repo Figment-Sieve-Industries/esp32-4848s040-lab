@@ -1,4 +1,4 @@
-// Screen 1 - power flow, design "M" (values in pills), 480x480 rotated (USB-C at the bottom):
+// Screen 1 - power flow, design N with design O's battery pill, 480x480 rotated (USB-C at the bottom):
 //
 //   13:05  Sat 10 Oct                     (wifi) <home-ssid>  -62 dBm
 //   ( SOLAR 3.68 kW )--->---+        [ weather / rain% / grid status ]

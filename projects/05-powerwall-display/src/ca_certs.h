@@ -157,5 +157,3 @@ inline constexpr char CPC_CA[] =
     "4uJEvlz36hz1\n"
     "-----END CERTIFICATE-----\n";
 
-// Old name, kept until the integration pass removes it (setCACert takes a const char *).
-inline constexpr const char *OPEN_METEO_CA = LETS_ENCRYPT_CA;

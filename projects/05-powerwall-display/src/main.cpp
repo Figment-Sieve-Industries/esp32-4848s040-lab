@@ -18,14 +18,18 @@
 //   l          list the screens: "index name", the current one marked with *
 //   b <0-255>  set the backlight now (not saved; the panel driver cuts out below ~100)
 //   m          print the memory / heap line now
+//   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
 //   h          help
 #include <Arduino.h>
 #include <Board4848S040.h>
 #include <Board4848S040_lvgl.h>
+#include <esp_rom_crc.h>
+#include <mbedtls/base64.h>
 #include <stdlib.h>
 #include <string.h>
 #include "energy.h"
 #include "history.h"
+#include "net_http.h"
 #include "powerwall.h"
 #include "screens.h"
 #include "ui_common.h"
@@ -215,6 +219,38 @@ static void cmdMem() {
     cmdReply(msg);
 }
 
+// Screenshot: the native (unrotated) RGB565 framebuffer as one base64 line per row, "#px <row> <b64>",
+// at SHOT_BAUD. Each line is a single Serial.write, so log lines from other tasks can interleave but
+// never split a row. Runs in loop(), so LVGL isn't drawing meanwhile. Host side: tools-dev/screendump.py.
+static constexpr uint32_t SHOT_BAUD = 921600;
+static void cmdShot() {
+    const uint16_t *fb = gfx->getFramebuffer();
+    static char line[16 + 4 * ((B4848_LCD_WIDTH * 2 + 2) / 3) + 2]; // "#px nnn " + base64 + "\n"
+    Serial.printf("#shot %d %d rgb565le native rot %d baud %lu\n", B4848_LCD_WIDTH, B4848_LCD_HEIGHT, SCREEN_ROTATION,
+                  (unsigned long)SHOT_BAUD);
+    Serial.flush();
+    delay(200); // host switches its baud rate after reading the header
+    Serial.updateBaudRate(SHOT_BAUD);
+    delay(50);
+    uint32_t crc = 0;
+    for (int r = 0; r < B4848_LCD_HEIGHT; r++) {
+        const uint8_t *row = reinterpret_cast<const uint8_t *>(fb + (size_t)r * B4848_LCD_WIDTH);
+        crc = esp_rom_crc32_le(crc, row, B4848_LCD_WIDTH * 2); // = zlib crc32, chained over the rows
+        int n = snprintf(line, sizeof(line), "#px %d ", r);
+        size_t olen = 0;
+        mbedtls_base64_encode(reinterpret_cast<unsigned char *>(line + n), sizeof(line) - n - 1, &olen, row,
+                              B4848_LCD_WIDTH * 2);
+        line[n + olen] = '\n';
+        Serial.write(reinterpret_cast<const uint8_t *>(line), n + olen + 1);
+    }
+    Serial.printf("#shot end crc %08lx\n", (unsigned long)crc);
+    Serial.flush();
+    delay(200);
+    Serial.updateBaudRate(115200);
+    delay(50);
+    cmdReply("shot #ok");
+}
+
 static void handleCommand(char *line) {
     while (*line == ' ' || *line == '\t') line++;
     char cmd = *line;
@@ -257,9 +293,12 @@ static void handleCommand(char *line) {
         case 'm':
             cmdMem();
             break;
+        case 'x':
+            cmdShot();
+            break;
         case 'h':
             cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | m memory | "
-                     "h help #ok");
+                     "x screenshot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");
@@ -384,7 +423,9 @@ void loop() {
                       (unsigned long)sd.ioErrors);
         // Redraw load (the acceptance metric for idle-redraw work): invalidated px and flushes per second
         if (windowMs == 0) windowMs = 1;
-        Serial.printf("  redraw: %lu px/s, %lu flushes/s\n", (unsigned long)((uint64_t)invPx * 1000 / windowMs),
-                      (unsigned long)((uint64_t)flushes * 1000 / windowMs));
+        net::Stats ns = net::stats();
+        Serial.printf("  redraw: %lu px/s, %lu flushes/s | net: %lu TLS connects, %lu requests, %lu failures\n",
+                      (unsigned long)((uint64_t)invPx * 1000 / windowMs), (unsigned long)((uint64_t)flushes * 1000 / windowMs),
+                      (unsigned long)ns.tlsConnects, (unsigned long)ns.requests, (unsigned long)ns.failures);
     }
 }

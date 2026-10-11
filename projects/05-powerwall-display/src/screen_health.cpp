@@ -145,7 +145,7 @@ lv_obj_t *healthCreate() {
                                   &s_lblEffUnit, 3);
     lv_obj_set_pos(evu, 14, 33);
     ui::setText(s_lblEffUnit, "%");
-    s_lblEffSub = ui::labelAt(s_cards[2], &lv_font_montserrat_12, ui::MUTED, "Lifetime: -- kWh", 14, 73, INNER_W);
+    s_lblEffSub = ui::labelAt(s_cards[2], &lv_font_montserrat_12, ui::MUTED, "Lifetime: --", 14, 73, INNER_W);
     lv_label_set_long_mode(s_lblEffSub, LV_LABEL_LONG_MODE_WRAP);
 
     s_cards[3] = ui::card(scr, 246, 318, CARD_W, 108);
@@ -217,14 +217,14 @@ void healthRefresh() {
     if (stale || d.battImportedWh <= 0) {
         ui::setText(s_lblEffVal, "--");
         ui::setHidden(s_lblEffUnit, true);
-        ui::setText(s_lblEffSub, "Lifetime: -- kWh");
+        ui::setText(s_lblEffSub, "Lifetime: --");
     } else {
         ui::setTextF(s_lblEffVal, "%.1f", d.battExportedWh / d.battImportedWh * 100.0);
         ui::setHidden(s_lblEffUnit, false);
         char in[16], out[16];
         ui::formatKWh(in, sizeof(in), d.battImportedWh / 1000.0, false);
         ui::formatKWh(out, sizeof(out), d.battExportedWh / 1000.0, false);
-        ui::setTextF(s_lblEffSub, "Lifetime: %s in / %s out kWh", in, out);
+        ui::setTextF(s_lblEffSub, "Lifetime: %s in / %s out", in, out); // kWh: one line at 12 px
     }
 
     // Grid services

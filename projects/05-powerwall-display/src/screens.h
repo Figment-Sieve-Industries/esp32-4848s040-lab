@@ -5,7 +5,7 @@
 // refresh() updates it from the latest data (called every 500 ms while it is the active
 // screen, and once right before it is shown); onShow() replays entry animations.
 
-lv_obj_t *houseCreate();   // power flow (design M, values in pills)
+lv_obj_t *houseCreate();   // power flow (design N, design O battery pill)
 void houseRefresh();
 
 lv_obj_t *todayCreate();   // today's energy
