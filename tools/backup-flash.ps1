@@ -39,5 +39,5 @@ $hash = (Get-FileHash $outFile -Algorithm SHA256).Hash
 Write-Host ''
 Write-Host "Backup:  $outFile" -ForegroundColor Green
 Write-Host "SHA256:  $hash"
-Write-Host 'Commit it: git add firmware/factory && git commit -m "Factory flash backup"'
+Write-Host 'Keep this file outside the repo and never commit it: it contains the board''s MAC address and the vendor firmware.' -ForegroundColor Yellow
 exit 0

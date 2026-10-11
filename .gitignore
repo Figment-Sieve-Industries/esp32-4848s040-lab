@@ -5,16 +5,20 @@ __pycache__/
 **/.vscode/*
 !**/.vscode/extensions.json
 
-# Firmware images: ignored except docs and firmware/ (backups are committed on purpose)
+# Firmware images are ignored everywhere (factory flash backups hold the board's MAC and vendor firmware,
+# so they must never be committed). Only docs/ may hold .bin files.
 *.bin
 !docs/**/*.bin
-!firmware/**/*.bin
 
 # Per-project credentials (copy secrets.example.h -> secrets.h)
 **/src/secrets.h
 
-# Serial test logs (06-sd-card-test/sd_serial.py)
-sd_serial_*.log
+# Serial and soak logs (they contain the home SSID)
+*.log
+
+# Screenshot output of tools-dev/screendump.py (e.g. `screendump.py COM9 out --all`)
+out/
+out-*.png
 
 # clang-tidy compilation database (tools/lint.ps1 moves it to %TEMP%; this is a safety net)
 compile_commands.json

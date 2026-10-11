@@ -40,7 +40,7 @@ Or in VS Code: **File > Open Folder** on the project folder, then use the Platfo
 .\tools\backup-flash.ps1                 # auto-detects the port; or -Port COM5
 .\tools\restore-flash.ps1 -File firmware\factory\<file>.bin
 ```
-- The backup reads all 16 MB, takes **a few minutes**, and saves to `firmware/factory/<mac>-<date>.bin`. That file **is committed to git**, so it can't be lost.
+- The backup reads all 16 MB, takes **a few minutes**, and saves to `firmware/factory/<mac>-<date>.bin`. That file is **git-ignored and must never be committed** (it holds the board's MAC and the vendor firmware); keep a copy outside the repo so it cannot be lost.
 - No backup? The vendor's factory demo images can still be restored. They are full merged images written at 0x0. See [`../firmware/README.md`](../firmware/README.md).
 
 ## Manual esptool

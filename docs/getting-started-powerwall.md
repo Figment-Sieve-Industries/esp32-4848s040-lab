@@ -4,7 +4,7 @@ Run a live Tesla Powerwall 3 dashboard on a cheap 4" touch screen (Guition ESP32
 
 Today you set it up by building the firmware yourself with PlatformIO and typing your settings into a file. That is a developer-style path, but you do not need to write any code. See [Coming soon](#9-coming-soon) for what is planned to make it simpler.
 
-Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 About your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [Flash from the browser](#flash-from-the-browser-prebuilt) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
+Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 Before you start: about your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [Flash from the browser](#flash-from-the-browser-prebuilt) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
 
 ## 1. What you get
 
@@ -21,7 +21,7 @@ Screens:
 7. Aurora (AuroraWatch UK plus NOAA Kp index)
 8. Sun and space weather (NOAA, SOHO sun image)
 9. El Nino (NOAA ENSO outlook)
-10. Settings (backlight slider, SD card status)
+10. Settings (backlight slider, on/off switches for the optional screens, SD card status)
 11. About (credits)
 
 What it does NOT do:
@@ -66,6 +66,7 @@ Lockout caution: a wrong password makes the firmware retry with back-off (30 s, 
 You need PlatformIO (to build the firmware) and, on some PCs, a USB driver.
 
 1. Install [VS Code](https://code.visualstudio.com/) and its **PlatformIO IDE** extension, or install PlatformIO Core on its own. Easiest on Windows is the VS Code extension. Install Git as well, to clone the repo.
+   - **macOS / Linux, PlatformIO Core only:** `python3 -m pip install --user "platformio>=6.1,<6.2"` (or your package manager's `platformio`), then check with `pio --version`. The repo's pinned platform needs Core 6.1.x; newer Core versions are not tested here, and this exact command line has not been tested on macOS or Linux.
 2. Clone this repository (the `reference/` submodules are not needed to build this project):
    ```
    git clone https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab.git
@@ -115,7 +116,7 @@ These strings come from the standard POSIX/tz-database conventions, not from thi
 
 Back up the board's original 16 MB flash before the first upload. It is the only way back to the vendor firmware.
 
-Windows (PowerShell, board plugged in):
+Windows (PowerShell, board plugged in; COM9 is only an example, replace it with your port):
 
 ```
 .\tools\backup-flash.ps1 -Port COM9
@@ -143,6 +144,8 @@ pio run -d projects/05-powerwall-display -t upload --upload-port /dev/ttyUSB0
 pio device monitor -d projects/05-powerwall-display
 ```
 
+**What you should see after flashing:** the upload ends with `SUCCESS`, the board restarts, the backlight comes on and the first screen appears within a few seconds; the serial monitor then prints boot lines and the heartbeat every 10 seconds.
+
 **First boot:** the screen lights up, joins Wi-Fi, sets the clock and starts polling the gateway. Expect the power-flow screen with live numbers within a few seconds to a minute. Swipe left/right to move between screens. Weather, moon, aurora, sun and El Nino screens fill in as each background fetch completes (some refresh only every 30 minutes to 12 hours). Rotation is set so the USB-C port is at the bottom.
 
 **Serial monitor** (115200 baud). Every 10 seconds a heartbeat prints live values, memory and network counters ([D-01](guide/02-debugging-playbook.md#d-01-serial-heartbeat)). The first line looks like this (Wi-Fi name and numbers are examples):
@@ -151,19 +154,21 @@ pio device monitor -d projects/05-powerwall-display
 [MyWiFi -58 dBm] solar 2500 home 3400 grid 900 batt 0 soc 100.0% on-grid | today solar 0.00 home 0.00 kWh | screen 0 | 46.4 fps
 ```
 
-Useful serial commands (type one and press Enter; the full list is at the top of `projects/05-powerwall-display/src/main.cpp`, and [D-09](guide/02-debugging-playbook.md#d-09-serial-command-interface) explains the interface):
+A subset of the serial commands (type one and press Enter; the full list is at the top of `projects/05-powerwall-display/src/main.cpp`, and [D-09](guide/02-debugging-playbook.md#d-09-serial-command-interface) explains the interface):
 
 | Command | What it does |
 |---|---|
-| `s <n>` | Go to screen n |
-| `n` / `p` | Next / previous screen |
-| `l` | List the screens |
+| `s <n>` | Go to screen n (`#err screen disabled` if it is switched off in Settings) |
+| `n` / `p` | Next / previous enabled screen |
+| `l` | List the screens (switched-off ones marked `-`) |
+| `e [<n> <0\|1>]` | List or switch screens on/off (same as the Settings switches) |
 | `b <0-255>` | Set backlight now (not saved; the panel cuts out below about 100) |
 | `m` | Print memory / heap line |
 | `x` | Screenshot (used by `tools-dev/screendump.py`, [D-10](guide/02-debugging-playbook.md#d-10-framebuffer-screenshots)) |
 | `v <0\|1>` | Privacy mode for screenshots: hides your Wi-Fi name and town |
 | `c` | List the cached records on the SD card |
 | `y [d\|w\|m\|-\|+]` | History screen: day/week/month tab, previous/next period |
+| `k` | Diagnostic: force a display scan-out restart (see the guide if the picture drifts) |
 | `r` | Reboot |
 | `h` | Help |
 

@@ -18,7 +18,11 @@ Plain-C++ checks of the network-side code, built with MSVC on the PC (no board n
   needs, and the counter-delta binning rules (negative delta, >30 min gap, hour change, DST repeated/skipped hour).
 
 - `src/backlight_curve.h`: the brightness slider's gamma curve (endpoints, monotonic, min-but-on at 0 %, rounding,
-  empty ranges, inverse) and the saved-settings decoding (V2 percentage, V1 raw-duty conversion, rejects).
+  empty ranges, inverse).
+
+- `src/settings_codec.h`: the saved-settings record: SET3 (brightness percent plus the screen on/off mask; always-on
+  screens forced on, unknown bits dropped), SET2 and SET1 loading (V1 raw-duty conversion, every screen on) and
+  rejects.
 
 Run from PowerShell:
 

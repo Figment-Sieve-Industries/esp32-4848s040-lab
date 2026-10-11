@@ -137,8 +137,8 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 
 - **Context.** With `LV_STDLIB_CLIB`, LVGL uses `malloc`. The core's `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096` sends every allocation under 4 KB to internal RAM first, which means every widget. Four screens left about 38 KB for TLS.
 - **Decision.** `LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN`, `LV_MEM_SIZE (1024*1024U)` and `LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)`. LVGL's pool is allocated once, in PSRAM. `LV_USE_STDLIB_STRING` stays `CLIB`.
-- **Alternatives.** The C heap (kept in `03-lvgl-demos`, a project without Wi-Fi). A static internal pool (`02-lvgl-hello` uses 48 KB): fine for a handful of widgets, not for ten screens.
-- **Consequences.** Widgets cost PSRAM, not internal RAM. LVGL's render and tree walks run against PSRAM, so object count still matters (ADR-19). A serial run with ten screens showed the pool about 16 percent used. The `m` command prints the pool state.
+- **Alternatives.** The C heap (kept in `03-lvgl-demos`, a project without Wi-Fi). A static internal pool (`02-lvgl-hello` uses 48 KB): fine for a handful of widgets, not for ten or more screens (11 now).
+- **Consequences.** Widgets cost PSRAM, not internal RAM. LVGL's render and tree walks run against PSRAM, so object count still matters (ADR-19). A serial run with ten screens (the count then; 11 now) showed the pool about 16 percent used. The `m` command prints the pool state.
 - **Evidence.** [07-gotchas.md](../07-gotchas.md) ("Internal RAM drains as you add LVGL screens"), `projects/05-powerwall-display/include/lv_conf.h`. Write-up: [inv-lvgl-heap-psram](03-investigations.md#inv-lvgl-heap-psram).
 
 ### ADR-09: Internal RAM is a budget: keep about 100 KB free
@@ -146,7 +146,7 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 - **Context.** Internal RAM is consumed by the LVGL draw buffer, bounce buffers, task stacks, Wi-Fi static buffers, ISR-safe code and one TLS session at a time. When a transient TLS peak finds too little, the handshake fails or the system misbehaves.
 - **Decision.** Treat about 100 KB of internal RAM free (low-water mark, "min ever") as the floor, and track it. Boot logs `[mem]` after each init step. The 10 s heartbeat and the `m` command print free, largest block, min ever and stack headroom. Every TLS job logs its low-water mark. Size the LVGL draw buffer last, from what is left.
 - **Alternatives.** Hard-coded limits from first principles: the numbers moved by 40 KB between commits for reasons nobody predicted (see consequences). Measuring beats estimating.
-- **Consequences.** Typical figures (unit 1): the 05 budget at boot was about 188 KB free and about 140 KB while polling in the early build. Growing to ten screens plus an SD task took free internal RAM from about 161 KB to about 121 KB (doc 12), and the low point to about 92 KB before ADR-11. A 10 minute serial run after ADR-11 showed a minimum of about 115 KB and 0 failures. Largest free block matters as much as the total: a 60 KB block is enough for a session, a 20 KB one is not.
+- **Consequences.** Typical figures (unit 1): the 05 budget at boot was about 188 KB free and about 140 KB while polling in the early build. Growing to ten screens (11 now) plus an SD task took free internal RAM from about 161 KB to about 121 KB (doc 12), and the low point to about 92 KB before ADR-11. A 10 minute serial run after ADR-11 showed a minimum of about 115 KB and 0 failures. Largest free block matters as much as the total: a 60 KB block is enough for a session, a 20 KB one is not.
 - **Evidence.** [12-esp32-performance-and-framework.md](../12-esp32-performance-and-framework.md) section 2 (the budget table), [hardware-log.md](../hardware-log.md). Write-up: [inv-internal-ram-budget](03-investigations.md#inv-internal-ram-budget).
 
 ### ADR-10: Bodies, JSON and images live in PSRAM
@@ -266,7 +266,7 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 - **Context.** HTTP/1.1 servers answer with chunked bodies, which need a correct chunk reader. HTTP/1.0 gets a plain body that ends at Content-Length or when the server closes. The gateway's `/aggregates` is chunked under HTTP/1.1, and a handshake per poll is expensive.
 - **Decision.** Every one-shot fetch uses HTTP/1.0 with connection close (`Options::keepAlive = false`). Keep-alive is opt-in per session: only the ENSO job uses it today (several requests to one host in one job). The gateway poll defaults to HTTP/1.0 (a handshake per 2 s poll); `PW_GW_KEEPALIVE=1` switches to HTTP/1.1 reuse with `net::readBody`. **Update 2026-10-11 (`c9a6630`): keep-alive is now the default** after a 10-minute soak: 22 TLS connects instead of 275, 1 handshake refusal instead of 19, 59 fps, no watchdog resets. `-DPW_GW_KEEPALIVE=0` restores the one-shot path.
 - **Alternatives.** Keep-alive everywhere to save handshakes: higher reward but the stall risk (ADR-07). Persistent connection with a custom parser: that is the opt-in path.
-- **Consequences.** A 10 minute serial run counted about 270 TLS connections and 0 failures at the default. Each handshake is a burst of CPU and internal-RAM churn, which is the cost kept in exchange for robustness. The keep-alive default has had a 10-minute soak, not yet a long one (several hours: projects/README.md follow-up).
+- **Consequences.** With the old one-shot default, a 10 minute serial run counted about 270 TLS connections and 0 background-fetch failures (gateway polls: 19 refusals); with keep-alive now the default it is about 22. Each handshake is a burst of CPU and internal-RAM churn, which is the cost kept in exchange for robustness. The keep-alive default has had a 10-minute soak, not yet a long one (several hours: projects/README.md follow-up).
 - **Evidence.** `powerwall.cpp` (`PW_GW_KEEPALIVE`), `powerwall.h`, [07-gotchas.md](../07-gotchas.md) ("JSON from an HTTP API parses as a number"). Write-up: [inv-httpclient-chunked-stall](03-investigations.md#inv-httpclient-chunked-stall).
 
 ### ADR-24: Job budget below the staleness limit
@@ -316,9 +316,9 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 ### ADR-29: SdStore owns the SD bus and never formats
 
 - **Context.** SD SCK/MOSI (GPIO48/47) are the same pins as the ST7701's 3-wire init bus. `SD.begin()` with no arguments would claim the default FSPI pins 10 to 13, which are LCD red bits on this board. There is no card-detect pin.
-- **Decision.** `common/lib/SdStore` creates its own `SPIClass` on the SD pins. It is initialised only after `board4848::initDisplay()`; after init the panel's CS (GPIO39) stays high and ignores SD traffic. Every card access takes one recursive mutex. It never formats a card. The helpers open, write and close in one call, so no `File` survives a card swap.
+- **Decision.** `common/lib/SdStore` creates its own `SPIClass` on the SD pins. It is initialised only after `board4848::initDisplay()`; after init the panel's CS (GPIO39) stays high and ignores SD traffic. Every card access, from any task, takes one recursive mutex (the lock serialises access; it does not confine it to one task). It never formats a card. The helpers open, write and close in one call, so no `File` survives a card swap.
 - **Alternatives.** SDMMC mode: the slot is wired for SPI. A shared bus with locking against the panel: not needed once the panel is initialised.
-- **Consequences.** Boot order is a rule: display first, then SD (see the init order in the checklist). Use `sdcard::Lock` for direct `SD.*` calls.
+- **Consequences.** Boot order is a rule: display first, then SD (see the init order in the checklist). Use `sdcard::Lock` for direct `SD.*` calls. In project 05 card I/O comes from more than one task: the SD task (`history.cpp`: minute log, day store, settings, baseline) reads and writes, and the fetch jobs on the network task write and read cache records (`cache::save` / `cache::load`) under the same lock. A slow or retrying card can therefore delay the network task for as long as the SdStore retry/step-down takes; an open option is to queue cache writes to the SD task. Serial diagnostic commands (for example `c`) may also do card I/O.
 - **Evidence.** `sd_store.h` header comment, `Board4848S040_pins.h`. Write-up: [inv-sd-bring-up](03-investigations.md#inv-sd-bring-up).
 
 ### ADR-30: The SD clock is tuned per card and remembered on the card
@@ -340,9 +340,9 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 ### ADR-32: Hot-swap by polling
 
 - **Context.** No card-detect pin. Users pull and insert cards while the device runs.
-- **Decision.** One task calls `sdcard::poll()` every 1 to 2 s (05 uses 2 s). It reads sector 0 (about 1 ms at 20 MHz). If the card is gone it unmounts; if unmounted it retries the mount every 2 s. All card I/O happens in that one low-priority task; UI code only copies data in and out.
+- **Decision.** One task calls `sdcard::poll()` every 1 to 2 s (05 uses 2 s). It reads sector 0 (about 1 ms at 20 MHz). If the card is gone it unmounts; if unmounted it retries the mount every 2 s. That task owns the polling and the history store's reads and writes; it is not the only card user (fetch jobs on the network task save and load cache records under the SdStore lock, see ADR-29), and UI code only copies data in and out.
 - **Alternatives.** Mounting once at boot: a loose card would need a reboot. Interrupt on a detect pin: no such pin.
-- **Consequences.** Pull and re-insert recovers without a reset (06 verified). Inserting a card can briefly drop the PC's USB-serial link; the ESP32 does not reset.
+- **Consequences.** Pull and re-insert recovers without a reset (06 verified). Because the network task also touches the card, a slow card can delay a fetch job; queueing cache writes to the SD task is an open option. Inserting a card can briefly drop the PC's USB-serial link; the ESP32 does not reset.
 - **Evidence.** `sd_store.h`, `history.cpp`, [hardware-log.md](../hardware-log.md).
 
 ### ADR-33: A patched SD library
