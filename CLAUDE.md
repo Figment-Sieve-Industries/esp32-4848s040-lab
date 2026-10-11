@@ -32,7 +32,7 @@ Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits on
 - `common/boards/`: rzeldent board JSONs (CIY1/CIY3)
 - `projects/NN-name/`: one PlatformIO project each. The index is `projects/README.md`.
 - `reference/`: prior-art git submodules (read-only)
-- `tools/`: PowerShell helpers. `firmware/`: vendor image notes; local flash backups (git-ignored).
+- `tools/`: PowerShell helpers; `make-flash-image.py` merges a build into one flashable image + ESP Web Tools manifest. `docs/flash/`: the browser flasher page (GitHub Pages, `release.yml`, ADR-36). `firmware/`: vendor image notes; local flash backups (git-ignored).
 - `.github/workflows/ci.yml`: CI (build all projects, host tests).
 
 ## Hard rules

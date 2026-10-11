@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flash the ESP32-4848S040 from your browser</title>
+<meta name="description" content="Install prebuilt firmware (Powerwall 3 display and demo projects) on the Guition ESP32-4848S040 over USB, straight from Chrome or Edge.">
+<style>
+  :root {
+    --bg: #0B0F14; --panel: #131A22; --line: #243040; --text: #E6EDF3; --muted: #9AA7B4;
+    --accent: #3DB2FF; --warn: #FFB347; --warn-bg: #2A2112;
+    --esp-tools-button-color: #3DB2FF; --esp-tools-button-text-color: #0B0F14;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .5rem; }
+  h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  p, ul, ol { margin: .5rem 0; }
+  .lead { color: var(--muted); }
+  .notice { border: 1px solid var(--warn); background: var(--warn-bg); border-radius: 8px; padding: .75rem 1rem; margin: 1rem 0; }
+  .notice strong:first-child { color: var(--warn); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; margin: .75rem 0; }
+  .card h3 { margin: 0 0 .25rem; font-size: 1.05rem; }
+  .card p { color: var(--muted); margin: 0 0 .75rem; }
+  .tag { display: inline-block; font-size: .75rem; padding: .05rem .5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: .4rem; vertical-align: middle; }
+  #no-serial { display: none; }
+  .no-serial #no-serial { display: block; }
+  .no-serial .card esp-web-install-button { display: none; }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 .3rem; font-size: .92em; }
+  footer { margin-top: 2.5rem; color: var(--muted); font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Flash the Guition ESP32-4848S040 from your browser</h1>
+  <p class="lead">Install prebuilt firmware over USB. No PlatformIO, no toolchain. For the 4&quot; 480x480 touch board with the ESP32-S3 N16R8 (16 MB flash, 8 MB PSRAM), sold as <em>Guition ESP32-4848S040C_I</em>.</p>
+
+  <!-- SETUP-NOTICE: delete this block once the on-device setup portal ships. Nothing else on the page depends on it. -->
+  <div class="notice" id="setup-notice" role="note">
+    <p><strong>Read this first.</strong> Until on-device setup ships, prebuilt firmware can't join your Wi-Fi; build from source with your own <code>secrets.h</code>.
+    The Powerwall image below is built with placeholder settings: it boots and shows the screens, but it shows offline / "--" because it cannot reach your network or gateway.
+    See <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/blob/main/docs/getting-started-powerwall.md">docs/getting-started-powerwall.md</a> for the build-it-yourself steps.
+    The demo images below need no settings and work as they are.</p>
+  </div>
+  <!-- /SETUP-NOTICE -->
+
+  <h2>Before you start</h2>
+  <ul>
+    <li><strong>Chrome or Edge on a desktop computer</strong> (Windows, macOS, Linux, ChromeOS). Web Serial is not available in Firefox, Safari, or on phones and tablets.</li>
+    <li>A USB-C <strong>data</strong> cable (a charge-only cable shows no port).</li>
+    <li><strong>CH340 driver.</strong> The board uses a CH340C USB-serial chip. If no port appears in the chooser, install the driver from the chip maker, WCH: <a href="https://www.wch-ic.com/downloads/CH341SER_EXE.html">CH341SER</a>. Windows 10/11 usually does this itself; macOS and Linux generally need nothing.</li>
+    <li>Close any serial monitor that has the port open.</li>
+  </ul>
+
+  <div class="notice" role="note">
+    <p><strong>Back up your factory firmware first.</strong> Installing replaces everything on the flash, and the "erase" option wipes it. Keep the vendor demo so you can go back:
+    <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/blob/main/docs/guide/02-debugging-playbook.md#d-18-flash-backup-and-restore">flash backup and restore (D-18)</a>
+    and <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/blob/main/docs/03-programming-and-flashing.md">programming and flashing</a>.</p>
+  </div>
+
+  <div class="notice" id="no-serial" role="alert">
+    <p><strong>This browser can't flash.</strong> Web Serial is missing here, so the install buttons are hidden. Open this page in Chrome or Edge on a desktop computer.</p>
+  </div>
+
+  <h2>Choose firmware</h2>
+
+  <section class="card" aria-labelledby="fw05">
+    <h3 id="fw05">Powerwall 3 display <span class="tag">needs setup</span></h3>
+    <p>The headline project: live solar, battery, grid and house power from your Powerwall 3 gateway, plus history, weather, moon, aurora and space-weather screens. Placeholder build, see the notice above.</p>
+    <esp-web-install-button manifest="manifest-05-powerwall-display.json">
+      <button slot="activate">Install Powerwall display</button>
+      <span slot="unsupported">Use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed">This page must be opened over HTTPS.</span>
+    </esp-web-install-button>
+  </section>
+
+  <section class="card" aria-labelledby="fw01">
+    <h3 id="fw01">01 Hello display and touch <span class="tag">demo</span></h3>
+    <p>Colour test, finger-paint and touch coordinates. Plain graphics, no LVGL. A quick check that the board works.</p>
+    <esp-web-install-button manifest="manifest-01-hello-display-touch.json">
+      <button slot="activate">Install 01 Hello</button>
+      <span slot="unsupported">Use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed">This page must be opened over HTTPS.</span>
+    </esp-web-install-button>
+  </section>
+
+  <section class="card" aria-labelledby="fw02">
+    <h3 id="fw02">02 LVGL hello <span class="tag">demo</span></h3>
+    <p>LVGL 9 starting point: a button, a backlight slider and an FPS monitor.</p>
+    <esp-web-install-button manifest="manifest-02-lvgl-hello.json">
+      <button slot="activate">Install 02 LVGL hello</button>
+      <span slot="unsupported">Use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed">This page must be opened over HTTPS.</span>
+    </esp-web-install-button>
+  </section>
+
+  <section class="card" aria-labelledby="fw03">
+    <h3 id="fw03">03 LVGL demos <span class="tag">demo</span></h3>
+    <p>Touch launcher for LVGL's official demos (Widgets, Music, Benchmark, Stress).</p>
+    <esp-web-install-button manifest="manifest-03-lvgl-demos.json">
+      <button slot="activate">Install 03 LVGL demos</button>
+      <span slot="unsupported">Use Chrome or Edge on a desktop computer.</span>
+      <span slot="not-allowed">This page must be opened over HTTPS.</span>
+    </esp-web-install-button>
+  </section>
+
+  <h2>How it works</h2>
+  <ol>
+    <li>Plug the board in and click an install button.</li>
+    <li>Pick the serial port (look for "USB-SERIAL CH340") and confirm.</li>
+    <li>Tick "Erase device" for a clean install (recommended when switching projects), then install. It takes a minute or two; do not unplug.</li>
+    <li>The board restarts into the new firmware.</li>
+  </ol>
+  <p>Each image is a single merged 16 MB-layout file written at address 0 (bootloader, partition table, app). Checksums are in <a href="SHA256SUMS.txt">SHA256SUMS.txt</a>. Every image is built by CI from the tagged source; nothing personal is inside.</p>
+
+  <footer>
+    <p>
+      <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab">Project README</a> |
+      <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/blob/main/docs/getting-started-powerwall.md">Getting started: Powerwall 3 display</a> |
+      <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/releases">Releases</a> |
+      <a href="https://github.com/Figment-Sieve-Industries/esp32-4848s040-lab/issues">Report a problem</a>
+    </p>
+    <p>Unofficial hobby project, MIT licence, provided as is. Not affiliated with Tesla or Guition. Flashing is at your own risk.</p>
+  </footer>
+</main>
+<script>
+  if (!('serial' in navigator)) document.documentElement.classList.add('no-serial');
+</script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</body>
+</html>

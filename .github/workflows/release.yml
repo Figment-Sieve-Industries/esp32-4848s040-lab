@@ -1,0 +1,134 @@
+# Release: build the flashable projects, merge each into one 16 MB image, attach them to a GitHub Release
+# and publish the browser flasher (docs/flash/ + the images) to GitHub Pages.
+#
+# - On a tag v*: builds, creates the Release (images + manifests + SHA256SUMS) and deploys Pages.
+# - On workflow_dispatch: builds and uploads the site as a workflow artifact so it can be inspected;
+#   tick "deploy_pages" to also deploy it (Pages deployments from a branch need the environment rule in docs/flash/README.md).
+#
+# Project 05 is built from src/secrets.example.h (placeholders): the image cannot join a real Wi-Fi network
+# until the on-device setup portal exists. Nothing secret is ever in these images.
+# Why Pages and not the release assets as the flasher's source: ADR-36 in docs/guide/04-patterns-and-decisions.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deploy_pages:
+        description: "Also deploy the built site to GitHub Pages"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - dir: 01-hello-display-touch
+            title: "01 Hello display and touch"
+          - dir: 02-lvgl-hello
+            title: "02 LVGL hello"
+          - dir: 03-lvgl-demos
+            title: "03 LVGL demos"
+          - dir: 05-powerwall-display
+            title: "05 Powerwall 3 display"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Cache PlatformIO
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('common/platformio-base.ini', 'projects/*/platformio.ini') }}
+      - name: Install PlatformIO Core 6.1.18 and esptool 5.0.2
+        # esptool 5.0.2 is the version the pinned pioarduino platform bundles; it is only used for merge_bin here.
+        run: pip install "platformio==6.1.18" "esptool==5.0.2"
+      - name: Placeholder secrets (project 05 and any other that has an example file)
+        run: |
+          d="projects/${{ matrix.dir }}/src"
+          if [ -f "$d/secrets.example.h" ] && [ ! -f "$d/secrets.h" ]; then cp "$d/secrets.example.h" "$d/secrets.h"; fi
+      - name: Build
+        run: pio run -d "projects/${{ matrix.dir }}"
+      - name: Version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME}"; else v="dev-${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Merge into one flashable image + manifest
+        run: python tools/make-flash-image.py "projects/${{ matrix.dir }}" out "${{ steps.ver.outputs.version }}" --title "${{ matrix.title }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-${{ matrix.dir }}
+          path: out/
+          if-no-files-found: error
+
+  site:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: image-*
+          path: images
+          merge-multiple: true
+      - name: Assemble the Pages site
+        run: |
+          set -e
+          mkdir -p _site/firmware
+          cp docs/flash/index.html _site/
+          cp images/*.bin _site/firmware/
+          cp images/manifest-*.json _site/
+          (cd _site/firmware && sha256sum *.bin > ../SHA256SUMS.txt)
+          ls -la _site _site/firmware
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: site
+          path: _site/
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: _site/
+
+  release:
+    # Only for tags. The only job with contents: write.
+    if: github.ref_type == 'tag'
+    needs: site
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: site
+          path: site
+      - name: Create the GitHub Release and attach images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" --generate-notes \
+            site/firmware/*.bin site/manifest-*.json site/SHA256SUMS.txt
+
+  pages:
+    if: github.ref_type == 'tag' || inputs.deploy_pages
+    needs: site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

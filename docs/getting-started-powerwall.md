@@ -4,7 +4,7 @@ Run a live Tesla Powerwall 3 dashboard on a cheap 4" touch screen (Guition ESP32
 
 Today you set it up by building the firmware yourself with PlatformIO and typing your settings into a file. That is a developer-style path, but you do not need to write any code. See [Coming soon](#9-coming-soon) for what is planned to make it simpler.
 
-Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 About your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
+Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 About your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [Flash from the browser](#flash-from-the-browser-prebuilt) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
 
 ## 1. What you get
 
@@ -190,9 +190,15 @@ Useful serial commands (type one and press Enter; the full list is at the top of
 
 More: the full symptom table is in the [debugging playbook](guide/02-debugging-playbook.md#symptom-to-first-method), and every known quirk is indexed in [guide 01](guide/01-quirks-and-gotchas.md).
 
+## Flash from the browser (prebuilt)
+
+A prebuilt image can be installed from Chrome or Edge on a desktop computer, with no PlatformIO: open <https://figment-sieve-industries.github.io/esp32-4848s040-lab/>, plug the board in with a USB-C data cable and press the install button. Back up the factory firmware first ([section 6](#6-back-up-the-factory-firmware-first)).
+
+**Until on-device setup ships, prebuilt firmware can't join your Wi-Fi.** The prebuilt Powerwall image is built with the placeholder `secrets.example.h`, so it boots and shows the screens but stays offline ("--"). To get live data, build from source with your own `secrets.h` ([section 5](#5-configure) and [section 7](#7-build-and-flash-first-boot)). The simple demo projects (01, 02, 03) need no settings and work from the browser as they are. The page, images and release process are described in [ADR-36](guide/04-patterns-and-decisions.md#adr-36-release-pipeline-and-browser-flashing).
+
 ## 9. Coming soon
 
-Planned, with no dates promised: on-device setup so you will not need to edit `secrets.h` (on first boot the display opens its own Wi-Fi hotspot and you enter your network, gateway and location from a phone setup page), flashing from the browser using prebuilt releases (no PlatformIO install), and automatic discovery of the gateway on your network.
+Planned, with no dates promised: on-device setup so you will not need to edit `secrets.h` (on first boot the display opens its own Wi-Fi hotspot and you enter your network, gateway and location from a phone setup page), a prebuilt image that works without a rebuild once setup lands (browser flashing itself is already there, see above), and automatic discovery of the gateway on your network.
 
 ## 10. Getting help and contributing
 
