@@ -16,6 +16,7 @@
 #endif
 
 #include "../src/backlight_curve.h"
+#include "../src/day_history_calc.h"
 #include "../src/net_body.h"
 #include "../src/time_util.cpp"
 #define ENSO_HOST_TEST 1
@@ -915,6 +916,162 @@ static void testBacklightCurve() {
     CHECK(SETTINGS_MAGIC_V1 == 0x53455431 && SETTINGS_MAGIC_V2 == 0x53455432); // on-disk values must not change
 }
 
+// ---- day_history_calc.h ---------------------------------------------------------------------------------
+static void testDayHistoryCalc() {
+    using namespace dayhist::calc;
+    // crc32: standard check value
+    CHECK(crc32("123456789", 9) == 0xCBF43926u);
+    CHECK(crc32("", 0) == 0);
+    CHECK(crc32("56789", 5, crc32("1234", 4)) == 0xCBF43926u); // chaining
+    // month lengths and leap years
+    CHECK(daysInMonth(2026, 2) == 28 && daysInMonth(2028, 2) == 29 && daysInMonth(1900, 2) == 28 &&
+          daysInMonth(2000, 2) == 29);
+    CHECK(daysInMonth(2026, 4) == 30 && daysInMonth(2026, 12) == 31 && daysInMonth(2026, 10) == 31);
+    // date arithmetic
+    CHECK(addDays(20261031, 1) == 20261101 && addDays(20261231, 1) == 20270101 && addDays(20260301, -1) == 20260228);
+    CHECK(addDays(20280301, -1) == 20280229 && addDays(20261011, -400) == 20250906);
+    CHECK(weekday(20261011) == 0 && weekday(20261010) == 6 && weekday(19700101) == 4 && weekday(20240229) == 4);
+    CHECK(mondayOf(20261011) == 20261005 && mondayOf(20261005) == 20261005 && mondayOf(20260101) == 20251229);
+    CHECK(addMonths(202610, -1) == 202609 && addMonths(202601, -1) == 202512 && addMonths(202612, 1) == 202701 &&
+          addMonths(202610, -24) == 202410);
+    CHECK(slotOfDate(20261011) == 10 && slotOfDate(20260101) == 0 && monthOf(20261011) == 202610);
+    // periods
+    int32_t dt[31];
+    CHECK(periodDates(SpanDay, 20261011, -1, dt) == 24 && dt[0] == 20261010);
+    CHECK(periodDates(SpanDay, 20261011, 5, dt) == 24 && dt[0] == 20261011); // never in the future
+    CHECK(periodDates(SpanWeek, 20261011, 0, dt) == 7 && dt[0] == 20261005 && dt[6] == 20261011); // Sunday
+    CHECK(periodDates(SpanWeek, 20261012, 0, dt) == 7 && dt[0] == 20261012 && dt[6] == 20261018); // Monday
+    CHECK(periodDates(SpanWeek, 20261011, -1, dt) == 7 && dt[0] == 20260928 && dt[6] == 20261004); // crosses month
+    CHECK(periodDates(SpanWeek, 20260105, -1, dt) == 7 && dt[0] == 20251229 && dt[6] == 20260104);
+    CHECK(periodDates(SpanWeek, 20260102, 0, dt) == 7 && dt[0] == 20251229 && dt[6] == 20260104); // crosses year
+    CHECK(periodDates(SpanMonth, 20261011, 0, dt) == 31 && dt[0] == 20261001 && dt[30] == 20261031);
+    CHECK(periodDates(SpanMonth, 20260315, -1, dt) == 28 && dt[27] == 20260228);
+    CHECK(periodDates(SpanMonth, 20280315, -1, dt) == 29 && dt[28] == 20280229);
+    CHECK(clampOffset(SpanDay, 3) == 0 && clampOffset(SpanDay, -999) == -400 && clampOffset(SpanWeek, -999) == -60 &&
+          clampOffset(SpanMonth, -999) == -24 && clampOffset(SpanMonth, -5) == -5);
+    // months needed from the card
+    int need[2];
+    periodDates(SpanWeek, 20261011, -1, dt);
+    CHECK(monthsNeeded(SpanWeek, dt, 7, 20261011, need) == 2 && need[0] == 202609 && need[1] == 202610);
+    periodDates(SpanWeek, 20261011, 0, dt);
+    CHECK(monthsNeeded(SpanWeek, dt, 7, 20261011, need) == 1 && need[0] == 202610);
+    periodDates(SpanDay, 20261011, 0, dt);
+    CHECK(monthsNeeded(SpanDay, dt, 24, 20261011, need) == 0);
+    periodDates(SpanMonth, 20261001, 0, dt);
+    CHECK(monthsNeeded(SpanMonth, dt, 31, 20261001, need) == 0);
+    // labels
+    char lb[24];
+    periodDates(SpanDay, 20261011, 0, dt);
+    periodLabel(SpanDay, 0, dt, 24, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "Today");
+    periodDates(SpanDay, 20261011, -1, dt);
+    periodLabel(SpanDay, -1, dt, 24, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "Yesterday");
+    periodDates(SpanDay, 20261011, -2, dt); // Friday 9 Oct
+    periodLabel(SpanDay, -2, dt, 24, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "Fri 9 Oct");
+    periodDates(SpanWeek, 20261011, 0, dt);
+    periodLabel(SpanWeek, 0, dt, 7, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "This week");
+    periodDates(SpanWeek, 20261018, -1, dt);
+    periodLabel(SpanWeek, -1, dt, 7, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "5-11 Oct");
+    periodDates(SpanWeek, 20261011, -1, dt);
+    periodLabel(SpanWeek, -1, dt, 7, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "28 Sep-4 Oct");
+    int n = periodDates(SpanMonth, 20261011, 0, dt);
+    periodLabel(SpanMonth, 0, dt, n, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "October 2026");
+    n = periodDates(SpanMonth, 20261011, -1, dt);
+    periodLabel(SpanMonth, -1, dt, n, lb, sizeof lb);
+    CHECK_EQ_STR(lb, "September 2026");
+    for (const char *ch = lb; *ch; ch++) CHECK((unsigned char)*ch < 128);
+
+    // binning
+    float hs[24] = {}, hh[24] = {}, hi[24] = {}, he[24] = {};
+    float *const bins[4] = {hs, hh, hi, he};
+    Prev p = {};
+    const double c0[4] = {1000, 2000, 300, 400};
+    const double c1[4] = {1500, 2600, 350, 400}; // +500 +600 +50 +0 Wh
+    CHECK(!foldReading(p, 1000, 10, c0, bins)); // first reading only remembers
+    CHECK(foldReading(p, 1002, 10, c1, bins));
+    CHECK(hs[10] > 0.4999f && hs[10] < 0.5001f && hh[10] > 0.5999f && hh[10] < 0.6001f && hi[10] > 0.0499f &&
+          he[10] == 0);
+    // hour change: the delta goes to the hour of the new reading
+    const double c2[4] = {1600, 2700, 350, 400};
+    CHECK(foldReading(p, 1004, 11, c2, bins));
+    CHECK(hs[11] > 0.0999f && hs[11] < 0.1001f && hs[10] < 0.5001f);
+    // negative delta: dropped per channel (the others still count), and the reading is remembered
+    const double c3[4] = {1650, 100, 360, 400};
+    foldReading(p, 1006, 11, c3, bins);
+    CHECK(hs[11] > 0.1499f && hh[11] > 0.0999f && hh[11] < 0.1001f && hi[11] > 0.0099f);
+    const double c4[4] = {1700, 150, 360, 400};
+    foldReading(p, 1008, 11, c4, bins);
+    CHECK(hh[11] > 0.1499f && hh[11] < 0.1501f); // +50 Wh from the new, lower baseline
+    // gap > 30 min: dropped; exactly 30 min: kept
+    float before = hs[12];
+    const double c5[4] = {5000, 4000, 400, 400};
+    CHECK(!foldReading(p, 1008 + 1801, 12, c5, bins) && hs[12] == before);
+    const double c6[4] = {5100, 4100, 400, 400};
+    CHECK(foldReading(p, 1008 + 1801 + 1800, 12, c6, bins) && hs[12] > 0.0999f);
+    // time going backwards and counter reset (huge delta) are ignored
+    const double c7[4] = {0, 0, 0, 0};
+    CHECK(!foldReading(p, 100, 12, c7, bins));
+    const double c8[4] = {900000, 0, 0, 0};
+    foldReading(p, 200, 12, c8, bins);
+    CHECK(hs[12] < 0.11f);
+    CHECK(!foldReading(p, 300, 24, c8, bins)); // bad hour never indexes out of range
+
+#ifdef _MSC_VER
+    // DST (MSVC knows the US rules): fall back 2026-11-01 02:00 EDT -> 01:00 EST repeats hour 1;
+    // spring forward 2026-03-08 02:00 EST -> 03:00 EDT skips hour 2.
+    _putenv_s("TZ", "EST5EDT");
+    _tzset();
+    auto hourAt = [](int y, int m, int d, int h24, int mm) {
+        time_t tt = (time_t)(daysFromCivil(y, m, d) * 86400 + h24 * 3600 + mm * 60); // a UTC instant
+        struct tm tm;
+        localtime_r(&tt, &tm);
+        return tm.tm_hour;
+    };
+    CHECK(hourAt(2026, 11, 1, 5, 30) == 1 && hourAt(2026, 11, 1, 6, 30) == 1); // 01:30 EDT and 01:30 EST
+    CHECK(hourAt(2026, 3, 8, 6, 30) == 1 && hourAt(2026, 3, 8, 7, 30) == 3);   // 01:30 EST, then 03:30 EDT
+    float a[24] = {}, b[24] = {}, c[24] = {}, e[24] = {};
+    float *const db[4] = {a, b, c, e};
+    Prev q = {};
+    double ctr[4] = {0, 0, 0, 0};
+    int64_t t0 = daysFromCivil(2026, 11, 1) * 86400 + 5 * 3600; // 01:00 EDT
+    for (int i = 0; i < 12; i++) {                              // every 10 min across both 01:xx hours
+        int64_t tt = t0 + i * 600;
+        time_t t2 = (time_t)tt;
+        struct tm tm;
+        localtime_r(&t2, &tm);
+        ctr[0] += 100;
+        foldReading(q, tt, tm.tm_hour, ctr, db);
+    }
+    float sum = 0;
+    for (int h = 0; h < 24; h++) sum += a[h];
+    CHECK(sum > 1.0999f && sum < 1.1001f); // 11 deltas of 100 Wh, nothing lost
+    CHECK(a[1] > 1.0999f);                 // both 01:xx hours add into the same bin 1
+    // spring: readings across the skipped hour
+    Prev r2 = {};
+    float s2[24] = {}, z1[24] = {}, z2[24] = {}, z3[24] = {};
+    float *const sb[4] = {s2, z1, z2, z3};
+    double cc[4] = {0, 0, 0, 0};
+    int64_t u0 = daysFromCivil(2026, 3, 8) * 86400 + 6 * 3600; // 01:00 EST
+    for (int i = 0; i < 12; i++) {
+        int64_t tt = u0 + i * 600;
+        time_t t2 = (time_t)tt;
+        struct tm tm;
+        localtime_r(&t2, &tm);
+        cc[0] += 100;
+        foldReading(r2, tt, tm.tm_hour, cc, sb);
+    }
+    CHECK(s2[2] == 0 && s2[1] > 0 && s2[3] > 0);
+    _putenv_s("TZ", "");
+    _tzset();
+#endif
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
@@ -924,6 +1081,7 @@ int main(int argc, char **argv) {
     testCacheHelpers();
     testCacheIo();
     testBacklightCurve();
+    testDayHistoryCalc();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }

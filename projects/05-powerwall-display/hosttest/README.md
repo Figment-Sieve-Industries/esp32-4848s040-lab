@@ -13,6 +13,10 @@ Plain-C++ checks of the network-side code, built with MSVC on the PC (no board n
   job due times, and save/load round trips on an in-memory SD card (`stubs/sd_store.h`, faked in test.cpp):
   no card, missing directory, version/size mismatches, truncated, too long and corrupt files, an 80 KB record.
 
+- `src/day_history_calc.h`: the history screen's pure logic: CRC-32 check value, month lengths and leap years, date
+  arithmetic, Monday-first weeks across month/year boundaries, period slots and ASCII labels, the card months a period
+  needs, and the counter-delta binning rules (negative delta, >30 min gap, hour change, DST repeated/skipped hour).
+
 - `src/backlight_curve.h`: the brightness slider's gamma curve (endpoints, monotonic, min-but-on at 0 %, rounding,
   empty ranges, inverse) and the saved-settings decoding (V2 percentage, V1 raw-duty conversion, rejects).
 
