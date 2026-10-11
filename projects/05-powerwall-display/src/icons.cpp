@@ -232,6 +232,7 @@ void loopAnim(lv_obj_t *obj, lv_anim_exec_xcb_t cb, int32_t a, int32_t b, uint32
     lv_anim_set_delay(&an, delay);
     lv_anim_set_repeat_count(&an, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&an, reverse ? lv_anim_path_ease_in_out : lv_anim_path_linear);
+    ui::animTag(&an);
     lv_anim_start(&an);
 }
 } // namespace

@@ -100,6 +100,6 @@ WeatherData weatherData();
 // Diagnostics: minimum free stack (bytes) seen so far in the network task.
 uint32_t netTaskStackFree();
 // Turns a background job (by its table name: weather, aurora, kp, moon, swpc, sunimg, enso) on or off at run
-// time. A disabled job never runs, whatever its schedule says; when re-enabled it runs as soon as it is due
-// (immediately if its time passed while it was off). Thread-safe (one atomic mask). False for an unknown name.
+// time. A disabled job never runs, whatever its schedule says; when re-enabled (off -> on) it is made due at once
+// (the net task resets its schedule), so a long disable never delays it. Thread-safe (one atomic mask). False for an unknown name.
 bool netSetJobEnabled(const char *name, bool on);

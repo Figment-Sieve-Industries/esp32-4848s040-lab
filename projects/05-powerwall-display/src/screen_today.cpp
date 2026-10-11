@@ -113,6 +113,7 @@ void pulseStart() {
     lv_anim_set_playback_duration(&a, PULSE_PERIOD_MS / 2);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    ui::animTag(&a);
     lv_anim_start(&a);
 }
 

@@ -30,6 +30,11 @@ struct SdStatus {
     bool baselineSaved = false;  // today's energy baseline is on the card
 };
 SdStatus historyStatus();
+// Diagnostics: minimum free stack (bytes) seen so far in the SD task (6 KB stack).
+uint32_t historyTaskStackFree();
+// Serial `c`: asks the SD task to print the SD cache listing (cache::printStatus) on its next pass, so card
+// I/O never runs on the UI thread. The listing appears on the serial console a moment after the reply.
+void historyRequestCacheStatus();
 
 // ---- Energy baseline backup (energy.cpp) ----
 // Queue a copy of the baseline record for the SD task to save (power-cut-safe, writeAtomic).

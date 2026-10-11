@@ -62,6 +62,8 @@ bool tryRestore() {
     if (!historyStatus().firstMountDone && millis() < RESTORE_WAIT_MS) return false;
     restoreTried = true;
     Baseline b;
+    // Runs on the UI thread, but only once after boot (before the first screen is shown) and reads a few bytes,
+    // so the short stall is acceptable; later card I/O all goes through the SD task.
     if (historyLoadBaseline(&b, sizeof(b)) && b.magic == MAGIC && b.check == checksum(b)) {
         memcpy(&rtc, &b, sizeof(rtc)); // byte copy: assignment needn't copy the hashed padding
         Serial.println("Energy: baseline restored from SD card");

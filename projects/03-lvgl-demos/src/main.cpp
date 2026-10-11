@@ -1,9 +1,10 @@
 // 03-lvgl-demos
-// A touch launcher for LVGL's official demos. The chosen demo is stored in NVS and the board
-// restarts into it (LVGL demos aren't designed to be torn down). The choice is one-shot: it's
-// cleared as soon as it's read, so any restart (home button, reset, crash) lands on the launcher.
+// A touch launcher for LVGL's official demos. The chosen demo is kept in RTC memory (no flash
+// writes) and the board restarts into it (LVGL demos aren't designed to be torn down). The choice is
+// one-shot: it's cleared as soon as it's read, so any restart (home button, reset, crash) lands on the
+// launcher. After a power cut the RTC memory is garbage; the magic check then also gives the launcher.
 #include <Arduino.h>
-#include <Preferences.h>
+#include <esp_attr.h>
 #include <Board4848S040.h>
 #include <Board4848S040_lvgl.h>
 #include <demos/lv_demos.h>
@@ -26,11 +27,14 @@ static const Demo DEMOS[] = {
 static constexpr int DEMO_COUNT = sizeof(DEMOS) / sizeof(DEMOS[0]);
 static constexpr int LAUNCHER = -1;
 
+// Survives ESP.restart() (software reset), not a power cycle (intended: power-up = launcher).
+static constexpr uint32_t CHOICE_MAGIC = 0xD3A05EED;
+static RTC_NOINIT_ATTR uint32_t s_choiceMagic;
+static RTC_NOINIT_ATTR int32_t s_choice;
+
 static void restartInto(int choice) {
-    Preferences prefs;
-    prefs.begin("demos", false);
-    prefs.putInt("choice", choice);
-    prefs.end();
+    s_choice = choice;
+    s_choiceMagic = CHOICE_MAGIC;
     delay(50);
     ESP.restart();
 }
@@ -108,11 +112,8 @@ void setup() {
     Serial.printf("Free internal heap: %lu, PSRAM: %lu\n", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                   (unsigned long)ESP.getFreePsram());
 
-    Preferences prefs;
-    prefs.begin("demos", false);
-    int choice = prefs.getInt("choice", LAUNCHER);
-    prefs.putInt("choice", LAUNCHER); // one-shot
-    prefs.end();
+    int choice = (s_choiceMagic == CHOICE_MAGIC) ? static_cast<int>(s_choice) : LAUNCHER;
+    s_choiceMagic = 0; // one-shot
 
 #ifdef DEMO_AUTORUN
     choice = DEMO_AUTORUN; // bench env: start straight into a demo

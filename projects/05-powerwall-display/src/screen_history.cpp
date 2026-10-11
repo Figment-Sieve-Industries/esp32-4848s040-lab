@@ -15,6 +15,7 @@
 #include "ui_chart.h"
 #include "icons.h"
 #include "day_history.h"
+#include "day_history_calc.h"
 
 // Optional visual check without data: -DHISTORY_FAKE_DATA fills the view with the design mockup numbers.
 namespace {
@@ -104,6 +105,15 @@ int s_mode = 0;          // 0 day, 1 week, 2 month (what the user chose)
 int s_offset = 0;        // 0 current period, -1 previous, ...
 int s_sel = -1;          // selected slot or -1
 bool s_canNext = false;  // from the last drawn view
+
+// Step the period offset, clamped to the store's depth (same limits as the data side). False at the limit.
+bool stepOffset(int dir) {
+    const int o = dayhist::calc::clampOffset(s_mode, s_offset + dir);
+    if (o == s_offset) return false;
+    s_offset = o;
+    return true;
+}
+bool canPrev() { return dayhist::calc::clampOffset(s_mode, s_offset - 1) != s_offset; }
 bool s_growPending = false; // play the bar grow once the data is in (user action / screen entry)
 
 struct Key {
@@ -190,7 +200,7 @@ void onTab(lv_event_t *e) {
 void onStep(lv_event_t *e) {
     int dir = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
     if (dir > 0 && !s_canNext) return;
-    s_offset += dir;
+    if (!stepOffset(dir)) return;
     requestPeriod(true);
 }
 
@@ -362,6 +372,7 @@ void drawView(const View &v, bool force) {
     if (!s_gate.changed(k, force)) return;
 
     s_canNext = v.canNext;
+    setLineColor(s_prevLine, canPrev() ? ui::TEXT : ui::DIM_BAR);
 
     for (int m = 0; m < 3; m++) {
         ui::setHidden(s_grp[m], m != mi);
@@ -573,8 +584,7 @@ bool historySetMode(int mode) {
 
 bool historyStep(int dir) {
     if (dir == 0) return false;
-    if (dir > 0 && s_offset >= 0) return false;
-    s_offset += dir > 0 ? 1 : -1;
+    if (!stepOffset(dir > 0 ? 1 : -1)) return false;
     requestPeriod(true);
     return true;
 }

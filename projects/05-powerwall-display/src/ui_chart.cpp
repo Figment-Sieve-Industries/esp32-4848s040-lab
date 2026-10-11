@@ -204,6 +204,7 @@ void barChartGrow(lv_obj_t *chart, uint32_t ms, uint32_t delay0, uint32_t stagge
     lv_anim_set_delay(&a, delay0);
     lv_anim_set_path_cb(&a, lv_anim_path_linear);
     lv_anim_set_completed_cb(&a, growDone);
+    animTag(&a);
     lv_anim_start(&a);
 }
 

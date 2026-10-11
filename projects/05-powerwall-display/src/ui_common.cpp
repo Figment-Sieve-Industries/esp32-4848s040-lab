@@ -60,6 +60,9 @@ void gestureCb(lv_event_t *) {
     lv_indev_wait_release(lv_indev_active());
 }
 
+// Address is the marker (see animTag).
+const char s_animTagByte = 0;
+
 void opaBg(void *o, int32_t v) { lv_obj_set_style_bg_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
 void opaText(void *o, int32_t v) { lv_obj_set_style_text_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
 void opaObj(void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
@@ -75,6 +78,7 @@ void loop(lv_obj_t *obj, lv_anim_exec_xcb_t cb, int32_t a, int32_t b, uint32_t p
     lv_anim_set_playback_duration(&an, periodMs / 2);
     lv_anim_set_repeat_count(&an, LV_ANIM_REPEAT_INFINITE);
     lv_anim_set_path_cb(&an, lv_anim_path_ease_in_out);
+    animTag(&an);
     lv_anim_start(&an);
 }
 
@@ -273,24 +277,24 @@ void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint3
     lv_anim_set_delay(&an, delayMs);
     lv_anim_set_path_cb(&an, lv_anim_path_ease_out);
     if (delayMs) cb(var, from); // apply the start value immediately during the delay
+    animTag(&an);
     lv_anim_start(&an);
 }
 
-namespace {
-
-} // namespace
+void animTag(lv_anim_t *a) { lv_anim_set_user_data(a, const_cast<char *>(&s_animTagByte)); }
 
 void pauseScreenAnimations(lv_obj_t *screen, bool pause) {
     if (!screen) return;
     // One pass over LVGL's animation list (it has no public enumeration; lv_anim_get returns only the
-    // first match). Every animation in this app has an lv_obj as its var (no lv_bar/lv_slider
-    // animations, whose var is a struct), so the owning screen is found from the var.
+    // first match). Only animations the app started (marked by animTag) are touched: LVGL's style
+    // transitions (e.g. the slider knob) have a trans_t* var, which is not an object.
     // Animations on the screen object itself are LVGL's slide transitions: never frozen (e.g. swiping
     // again while a slide is still running).
     lv_ll_t *ll = &LV_GLOBAL_DEFAULT()->anim_state.anim_ll;
     for (auto *a = static_cast<lv_anim_t *>(lv_ll_get_head(ll)); a; a = static_cast<lv_anim_t *>(lv_ll_get_next(ll, a))) {
+        if (lv_anim_get_user_data(a) != &s_animTagByte) continue;
         auto *o = static_cast<lv_obj_t *>(a->var);
-        if (!o || o == screen || lv_obj_get_screen(o) != screen) continue;
+        if (!o || o == screen || !lv_obj_is_valid(o) || lv_obj_get_screen(o) != screen) continue;
         if (pause) {
             if (!lv_anim_is_paused(a)) lv_anim_pause(a);
         } else if (lv_anim_is_paused(a)) {

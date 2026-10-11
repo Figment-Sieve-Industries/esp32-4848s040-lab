@@ -408,6 +408,9 @@ struct JobState {
 JobState s_jobs[JOB_COUNT];
 static_assert(JOB_COUNT <= 32, "job enable mask is one 32-bit word");
 std::atomic<uint32_t> s_jobOff{0}; // bit i set = JOBS[i] disabled (netSetJobEnabled)
+// bit i set = JOBS[i] was just re-enabled: the net task makes it due now. (A stale `next` from before a
+// long disable would otherwise look "in the future" once millis() wraps the signed 24.8 day window.)
+std::atomic<uint32_t> s_jobReset{0};
 
 // Runs a TLS job with the gateway's session closed first (one TLS session at a time), logging the
 // internal-RAM low-water mark it reached.
@@ -422,6 +425,10 @@ bool runTls(const JobDef &j) {
 }
 
 void runOneJob() {
+    if (const uint32_t reset = s_jobReset.exchange(0)) {
+        for (size_t i = 0; i < JOB_COUNT; i++)
+            if (reset & (1u << i)) s_jobs[i].next = millis();
+    }
     const uint32_t now = millis();
     for (size_t i = 0; i < JOB_COUNT; i++) {
         const JobDef &j = JOBS[i];
@@ -608,8 +615,8 @@ uint32_t netTaskStackFree() { return s_netTask ? uxTaskGetStackHighWaterMark(s_n
 bool netSetJobEnabled(const char *name, bool on) {
     for (size_t i = 0; i < JOB_COUNT; i++) {
         if (strcmp(JOBS[i].name, name) != 0) continue;
-        if (on) s_jobOff.fetch_and(~(1u << i));
-        else s_jobOff.fetch_or(1u << i);
+        if (!on) s_jobOff.fetch_or(1u << i);
+        else if (s_jobOff.fetch_and(~(1u << i)) & (1u << i)) s_jobReset.fetch_or(1u << i); // off -> on: due now
         return true;
     }
     return false;
