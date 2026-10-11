@@ -22,8 +22,5 @@ struct MoonPhase {
 // Phase information at the given UTC time.
 MoonPhase moonPhase(time_t utc);
 
-// Short phase name for octant 0..7 (same strings as MoonPhase::name).
-const char *moonOctantName(int octant);
-
 // Sun altitude in degrees (refraction ignored) at the given place; < -12 = nautical dark.
 double sunAltitudeDeg(time_t utc, double latDeg, double lonDeg);
