@@ -15,7 +15,9 @@ Plain-C++ checks of the network-side code, built with MSVC on the PC (no board n
 
 - `src/day_history_calc.h`: the history screen's pure logic: CRC-32 check value, month lengths and leap years, date
   arithmetic, Monday-first weeks across month/year boundaries, period slots and ASCII labels, the card months a period
-  needs, and the counter-delta binning rules (negative delta, >30 min gap, hour change, DST repeated/skipped hour).
+  needs, and the counter-delta binning rules (negative delta, >30 min gap, hour change, DST repeated/skipped hour);
+  also the per-bin max merge of a restored record (no double counting after a power cut) and the wrap-safe save
+  retry gate (idle gate never blocks, armed gate expires across the 32-bit millis() wrap).
 
 - `src/backlight_curve.h`: the brightness slider's gamma curve (endpoints, monotonic, min-but-on at 0 %, rounding,
   empty ranges, inverse) and the saved-settings decoding (V2 percentage, V1 raw-duty conversion, rejects).

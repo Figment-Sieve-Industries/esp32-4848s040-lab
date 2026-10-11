@@ -131,10 +131,12 @@ bool s_awaiting = false; // s_base is waiting for month files
 struct MonthEntry {
     int ym = 0;          // yyyymm, 0 = free
     uint32_t tick = 0;
+    uint32_t gen = 0;          // mount generation the entry was loaded in; older ones are never used
     DayRecord *recs = nullptr; // PSRAM, MAX_SLOTS records, invalid slots zeroed
 };
 MonthEntry s_cache[CACHE_MONTHS];
 uint32_t s_tick = 0;
+uint32_t s_curGen = 1; // bumped (s_mu held) each time the card comes back after being seen unmounted
 
 uint32_t s_saves = 0, s_loads = 0, s_errors = 0, s_lastSaveMs = 0;
 bool s_haveSave = false;
@@ -152,9 +154,10 @@ bool s_haveSig = false;
 // ---- SD-task-only state ----------------------------------------------------------------------------------
 uint8_t *s_work = nullptr; // MONTH_BYTES scratch for reads
 bool s_prevMounted = false;
-uint32_t s_retryAt = 0;
+calc::RetryGate s_gate;  // save retry delay (wrap-safe, see calc::RetryGate)
 int s_failYm = 0, s_failN = 0;
-int s_restoreFails = 0;
+int s_blockYm = 0;       // month whose unreadable file could not be moved aside: never saved (until a new card)
+bool s_cardDown = false; // saw the card unmounted since the last mounted observation
 
 // ---- Time -----------------------------------------------------------------------------------------------
 bool localNow(int32_t &ymd, int &hour, time_t &now) {
@@ -169,8 +172,14 @@ bool localNow(int32_t &ymd, int &hour, time_t &now) {
 
 // ---- Cache (call with s_mu held, except where noted) ---------------------------------------------------
 MonthEntry *findMonth(int ym) {
-    for (MonthEntry &e : s_cache)
-        if (e.ym == ym && e.recs) return &e;
+    for (MonthEntry &e : s_cache) {
+        if (e.ym != ym || !e.recs) continue;
+        if (e.gen != s_curGen) { // loaded before a card dropout: it may not match what is on the card now
+            e.ym = 0;
+            return nullptr;
+        }
+        return &e;
+    }
     return nullptr;
 }
 
@@ -372,16 +381,15 @@ void queueToday() {
 }
 
 // ---- Merging a record loaded from the card after a power cut ---------------------------------------------
-void mergeLoaded(const DayRecord &l) {
-    DayRecord &r = rtc.rec;
-    for (int h = 0; h < 24; h++) {
-        // the live bins start after the reboot, the loaded ones end at the last save: they don't overlap
-        r.hSolar[h] += l.hSolar[h];
-        r.hHome[h] += l.hHome[h];
-        r.hImp[h] += l.hImp[h];
-        r.hExp[h] += l.hExp[h];
+// Per-bin max for every channel, not a sum: the card copy and the live bins can cover the same time (the
+// hourly solar is restored from the card by energy.cpp and back-filled into the live bins), see calc::mergeMax.
+void mergeLoaded(DayRecord &r, const DayRecord &l) {
+    calc::mergeBins(r.hSolar, l.hSolar, 24);
+    calc::mergeBins(r.hHome, l.hHome, 24);
+    calc::mergeBins(r.hImp, l.hImp, 24);
+    calc::mergeBins(r.hExp, l.hExp, 24);
+    for (int h = 0; h < 24; h++)
         if (r.soc[h] == SOC_NONE) r.soc[h] = l.soc[h];
-    }
     if (l.solar > r.solar) r.solar = l.solar;
     if (l.home > r.home) r.home = l.home;
     if (l.imp > r.imp) r.imp = l.imp;
@@ -422,39 +430,92 @@ int validateMonth(uint8_t *buf, size_t usedLen, int ym) {
     return days;
 }
 
-// Reads a month file into s_work. Ok / Missing (no file) / Error (a file exists but could not be read).
+// SD task: tracks card dropouts. SdStore unmounts by itself when the card goes (history.cpp's poll notices
+// up to 2 s later), so every card access first looks at mounted(). Once the card was seen down, the next time
+// it is up is a new generation: cache entries from before are dropped and never used or written back.
+void syncGen() {
+    if (!sdcard::mounted()) {
+        s_cardDown = true;
+        return;
+    }
+    if (!s_cardDown) return;
+    s_cardDown = false;
+    s_blockYm = 0;
+    s_gate.clear();
+    LockGuard g(s_mu);
+    s_curGen++;
+    for (MonthEntry &e : s_cache) e.ym = 0; // buffers stay allocated
+}
+
+// Moves an unreadable month file aside as YYYY-MM.bin.bad (kept for recovery). True if nothing is left at
+// the original names (or there was nothing to move).
+bool quarantineMonth(int ym) {
+    char path[48], tmp[56], bad[56];
+    monthPath(ym, false, path, sizeof(path));
+    monthPath(ym, true, tmp, sizeof(tmp));
+    snprintf(bad, sizeof(bad), "%s.bad", path);
+    sdcard::Lock lk;
+    bool ok = true;
+    if (SD.exists(path)) {
+        if (SD.exists(bad)) SD.remove(bad);
+        ok = SD.rename(path, bad);
+        if (ok) Serial.printf("dayhist: unreadable %s moved to %s\n", path, bad);
+    }
+    if (ok && SD.exists(tmp)) ok = SD.remove(tmp);
+    return ok;
+}
+
+// Reads a month file into s_work. Ok / Missing (no file) / Error (a file exists but could not be read, or the
+// card is not mounted: never Missing then, or a dropout would look like an empty month).
 LoadStatus readMonth(int ym, int &days) {
+    days = 0;
+    if (!sdcard::mounted()) return LoadStatus::Error;
     char path[48], tmp[56];
     monthPath(ym, false, path, sizeof(path));
     monthPath(ym, true, tmp, sizeof(tmp));
     size_t len = 0;
+    bool fromTmp = false;
     bool ok = sdcard::readFile(path, s_work, MONTH_BYTES, &len);
-    if (!ok) ok = sdcard::readFile(tmp, s_work, MONTH_BYTES, &len) && len == MONTH_BYTES; // cut during replace
+    if (!ok) {
+        ok = sdcard::readFile(tmp, s_work, MONTH_BYTES, &len) && len == MONTH_BYTES; // cut during replace
+        fromTmp = ok;
+    }
     if (!ok) {
         bool exists;
         {
             sdcard::Lock lk;
             exists = SD.exists(path) || SD.exists(tmp);
         }
-        days = 0;
+        if (!sdcard::mounted()) return LoadStatus::Error; // dropped out during the read
         return exists ? LoadStatus::Error : LoadStatus::Missing;
     }
     days = validateMonth(s_work, len, ym);
+    if (fromTmp && days > 0) { // the cut hit between remove and rename: make the complete .tmp the real file
+        sdcard::Lock lk;       // before anything rewrites it (a second cut must not find no valid copy)
+        if (!SD.exists(path) && SD.rename(tmp, path))
+            Serial.printf("dayhist: recovered %s from its .tmp\n", path);
+    }
     return LoadStatus::Ok;
 }
 
 // Makes sure `ym` is in the cache (loading it from the card if needed). `keep` lists months not to evict.
 LoadStatus ensureMonth(int ym, const int *keep, int nkeep) {
+    syncGen();
     {
         LockGuard g(s_mu);
         if (findMonth(ym)) return LoadStatus::Ok;
     }
     if (!s_work) s_work = static_cast<uint8_t *>(psramAlloc(MONTH_BYTES));
     if (!s_work) return LoadStatus::Error;
+    if (!sdcard::mounted()) return LoadStatus::Error;
+    const uint32_t gen = s_curGen; // only written by this task
     uint32_t t0 = millis();
     int days = 0;
     LoadStatus st = readMonth(ym, days);
+    syncGen();
+    if (st != LoadStatus::Error && (!sdcard::mounted() || gen != s_curGen)) st = LoadStatus::Error;
     if (st == LoadStatus::Error) {
+        if (!sdcard::mounted()) return LoadStatus::Error; // a dropout is not a read error of this month
         s_errors++;
         if (s_failYm == ym) s_failN++;
         else {
@@ -462,7 +523,13 @@ LoadStatus ensureMonth(int ym, const int *keep, int nkeep) {
             s_failN = 1;
         }
         if (s_failN < LOAD_FAIL_LIMIT) return LoadStatus::Error;
-        Serial.printf("dayhist: %04d-%02d unreadable %d times, starting it empty\n", ym / 100, ym % 100, s_failN);
+        // Persistently unreadable: keep the file as .bad for recovery and start the month empty. If it cannot
+        // be moved aside, the month may still be viewed (empty) but is never saved, so it is not overwritten.
+        Serial.printf("dayhist: %04d-%02d unreadable %d times\n", ym / 100, ym % 100, s_failN);
+        if (!quarantineMonth(ym)) {
+            if (s_blockYm != ym) Serial.printf("dayhist: cannot move %04d-%02d aside, it will not be saved\n", ym / 100, ym % 100);
+            s_blockYm = ym;
+        }
         st = LoadStatus::Missing;
         days = 0;
     }
@@ -488,6 +555,7 @@ LoadStatus ensureMonth(int ym, const int *keep, int nkeep) {
         if (!victim->recs) victim->recs = static_cast<DayRecord *>(psramAlloc(MONTH_BYTES));
         if (!victim->recs) return LoadStatus::Error;
         victim->ym = ym;
+        victim->gen = gen;
         victim->tick = ++s_tick;
         memcpy(victim->recs, s_work, MONTH_BYTES);
         s_loads++;
@@ -505,13 +573,14 @@ bool saveRecord(const DayRecord &rec) {
         return false;
     }
     const int ym = calc::monthOf(rec.date);
+    if (ym == s_blockYm) return false; // its unreadable file could not be moved aside: don't overwrite it
     if (ensureMonth(ym, &ym, 1) == LoadStatus::Error) return false;
     uint32_t t0 = millis();
     MonthEntry *e;
     {
         LockGuard g(s_mu);
-        e = findMonth(ym);
-        if (!e) return false;
+        e = findMonth(ym); // refuses entries loaded in an older mount generation
+        if (!e || !sdcard::mounted() || s_cardDown) return false;
         memcpy(&e->recs[calc::slotOfDate(rec.date)], &rec, REC_SZ);
     }
     char path[48], tmp[56];
@@ -546,9 +615,12 @@ bool serveRestore() {
     }
     const int ym = calc::monthOf(date);
     LoadStatus st = ensureMonth(ym, &ym, 1);
-    if (st == LoadStatus::Error && ++s_restoreFails < 3) return true;
+    // Only a definite answer ends the restore: a month read (Ok) or a mounted card with no file (Missing).
+    // Errors are retried on later ticks, however many: giving up would let the next save replace the card's
+    // copy of today with only the bins gathered since the reboot.
+    if (st == LoadStatus::Error) return true;
     LockGuard g(s_mu);
-    const DayRecord *r = st == LoadStatus::Error ? nullptr : findRec(date);
+    const DayRecord *r = findRec(date);
     s_restoreHave = r != nullptr;
     if (r) memcpy(&s_restoreRec, r, REC_SZ);
     s_restore = Restore::Done;
@@ -556,17 +628,23 @@ bool serveRestore() {
 }
 
 bool servePending() {
-    if (static_cast<int32_t>(millis() - s_retryAt) < 0) return false;
+    if (s_gate.blocked(millis())) return false;
     DayRecord rec;
     uint32_t ver;
     {
         LockGuard g(s_mu);
-        if (!s_pendN) return false;
-        memcpy(&rec, &s_pend[0].rec, REC_SZ);
-        ver = s_pend[0].ver;
+        int pick = -1;
+        for (int i = 0; i < s_pendN && pick < 0; i++) {
+            // hold today's record while the card's copy has not been merged in yet (see Restore)
+            const bool held = s_restore != Restore::None && s_pend[i].rec.date == s_restoreDate;
+            if (!held && calc::monthOf(s_pend[i].rec.date) != s_blockYm) pick = i;
+        }
+        if (pick < 0) return false;
+        memcpy(&rec, &s_pend[pick].rec, REC_SZ);
+        ver = s_pend[pick].ver;
     }
     if (!saveRecord(rec)) {
-        s_retryAt = millis() + SAVE_RETRY_MS;
+        s_gate.arm(millis(), SAVE_RETRY_MS);
         return true;
     }
     LockGuard g(s_mu);
@@ -633,7 +711,6 @@ void dayHistoryUpdate(const PwData &d, const TodayStats &t) {
         s_restore = Restore::Wanted;
         s_restoreDate = today;
         s_restoreStartMs = millis();
-        s_restoreFails = 0;
     } else if (rtc.rec.date != today) {
         if (rtc.rec.date < today && (rtc.rec.flags & DAY_PRESENT)) { // the day ended: save its last state
             fillTotalsIfEmpty(rtc.rec);
@@ -643,31 +720,61 @@ void dayHistoryUpdate(const PwData &d, const TodayStats &t) {
             memcpy(&s_lastDone, &rtc.rec, REC_SZ);
             s_haveLastDone = true;
             Serial.printf("dayhist: day %ld finished, queued for saving\n", static_cast<long>(rtc.rec.date));
+        } else if (rtc.rec.date > today && (rtc.rec.flags & DAY_PRESENT) && validDate(rtc.rec.date)) {
+            // the clock moved back to an earlier date: keep what the record holds, then start today's
+            fillTotalsIfEmpty(rtc.rec);
+            rtcSeal();
+            LockGuard g(s_mu);
+            queueSaveLocked(rtc.rec);
+            Serial.printf("dayhist: clock went back, queued %ld for saving\n", static_cast<long>(rtc.rec.date));
         }
         startDayRec(today, true);
         s_lastQueueHour = -1;
     }
     if (s_rtcState[0] == 'i') s_rtcState = "ok"; // survived a restart
 
-    // A power cut: take what the card has of today, once it answers (or give up after 20 s without it)
-    bool adopt = false;
+    // A power cut: take what the card has of today. The restore stays pending until a read gives a definite
+    // answer (record found, or a mounted card with no file); today's saves and the solar back-fill below wait
+    // for it, so post-boot bins can't replace the card's copy. With no card it simply waits for one.
+    bool restoring = false, requeue = false;
     {
         LockGuard g(s_mu);
         if (s_restore == Restore::Done) {
-            adopt = s_restoreHave && s_restoreRec.date == today && recOk(s_restoreRec);
-            if (adopt) {
-                mergeLoaded(s_restoreRec);
+            const bool have = s_restoreHave && recOk(s_restoreRec);
+            if (have && s_restoreRec.date == today) {
+                mergeLoaded(rtc.rec, s_restoreRec);
                 s_rtcState = "restored";
+                requeue = true;
+                for (int i = 0; i < s_pendN;) { // held copies of today lack the card's bins: drop, requeue below
+                    if (s_pend[i].rec.date == today) {
+                        for (int k = i + 1; k < s_pendN; k++) s_pend[k - 1] = s_pend[k];
+                        s_pendN--;
+                    } else {
+                        i++;
+                    }
+                }
             } else {
                 s_rtcState = "empty";
+                if (have) { // midnight passed while waiting: the card's copy belongs to a queued, held record
+                    for (int i = 0; i < s_pendN; i++)
+                        if (s_pend[i].rec.date == s_restoreRec.date) {
+                            mergeLoaded(s_pend[i].rec, s_restoreRec);
+                            sealRec(s_pend[i].rec);
+                            s_pend[i].ver = ++s_verCtr;
+                        }
+                    if (s_haveLastDone && s_lastDone.date == s_restoreRec.date) {
+                        mergeLoaded(s_lastDone, s_restoreRec);
+                        sealRec(s_lastDone);
+                    }
+                }
             }
             s_restore = Restore::None;
         } else if (s_restore == Restore::Wanted && !s_mounted.load() &&
-                   millis() - s_restoreStartMs > RESTORE_WAIT_MS) {
-            s_restore = Restore::None;
-            s_rtcState = "nocard";
-            Serial.println("dayhist: no card, today's earlier bins are lost");
+                   millis() - s_restoreStartMs > RESTORE_WAIT_MS && strcmp(s_rtcState, "nocard") != 0) {
+            s_rtcState = "nocard"; // keeps waiting; the restore runs when a card appears
+            Serial.println("dayhist: no card yet, waiting to restore today's earlier bins");
         }
+        restoring = s_restore != Restore::None;
     }
 
     // A fresh reading: the counter deltas go into the current hour's bins
@@ -697,14 +804,16 @@ void dayHistoryUpdate(const PwData &d, const TodayStats &t) {
             r.battOut = static_cast<float>(t.battOutKWh);
             r.flags = static_cast<uint8_t>(t.partial ? (r.flags | DAY_PARTIAL) : (r.flags & ~DAY_PARTIAL));
             // energy.cpp bins solar per hour since its baseline: fill finished hours this record missed
-            // (the first day after flashing, or bins lost in a power cut without a card)
-            for (int h = 0; h < hour && h < 24; h++)
+            // (the first day after flashing, or bins lost in a power cut without a card). Not while the card's
+            // copy is still to be merged in: energy.cpp's hourly solar comes from the same card data.
+            for (int h = 0; h < hour && h < 24 && !restoring; h++)
                 if (r.hSolar[h] <= 0.0f && t.hourlySolarKWh[h] > 0.0f) r.hSolar[h] = t.hourlySolarKWh[h];
         } else {
             fillTotalsIfEmpty(r);
         }
     }
     rtcSeal();
+    if (requeue) queueToday(); // the merged record replaces the copies dropped above
 
     // Save when the hour changes and every 10 minutes
     if (rtc.rec.flags & DAY_PRESENT) {
@@ -775,18 +884,7 @@ void logPanelCs(const char *when) {
                   (int)((en >> bit) & 1), (int)((out >> bit) & 1), gpio_get_level(static_cast<gpio_num_t>(B4848_LCD_CS)));
 }
 
-// The junk file the first diag run wrote (fired before the clock was valid, before saveRecord checked dates)
-void removeDiagJunk() {
-    static bool done = false;
-    if (done) return;
-    done = true;
-    sdcard::Lock lk;
-    if (SD.exists("/powerwall/days/-73918--60.bin") && SD.remove("/powerwall/days/-73918--60.bin"))
-        Serial.println("dayhist: removed the junk file from the first diag run");
-}
-
 bool serveForce() {
-    removeDiagJunk();
     if (s_forceN.load() <= 0) return false;
     DayRecord r;
     {
@@ -812,12 +910,15 @@ void dayHistoryForceSaves(int n) {
 
 void dayHistorySdTick(bool mounted) {
     s_mounted.store(mounted);
+    if (!mounted) s_cardDown = true;
+    syncGen(); // also notices a dropout the caller hasn't been told about yet
+    mounted = mounted && sdcard::mounted();
     if (mounted && serveForce()) return;
     if (mounted != s_prevMounted) {
         s_prevMounted = mounted;
         if (mounted) { // new or swapped card: forget what the old one held
             dropCache();
-            s_retryAt = millis();
+            s_gate.clear();
             LockGuard g(s_mu);
             if (s_reqValid) applyRequestLocked();
         }

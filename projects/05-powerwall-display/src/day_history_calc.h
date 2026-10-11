@@ -191,5 +191,36 @@ inline bool foldReading(Prev &p, int64_t now, int hour, const double cur[CHANNEL
     return added;
 }
 
+// ---- Merging a record from the card into the live one -------------------------------------------------
+// After a power cut the card's copy of today ends at its last save and the live bins start at the reboot,
+// but the live bins can still cover the same time (energy.cpp's hourly solar is restored from the card and
+// back-filled into them too), so adding the two would count that time twice. Per-bin max() is the safe
+// merge: it never exceeds the larger of the two views of the same hour.
+inline void mergeMax(float &live, float card) {
+    if (card > live) live = card;
+}
+inline void mergeBins(float *live, const float *card, int n) {
+    for (int i = 0; i < n; i++) mergeMax(live[i], card[i]);
+}
+
+// ---- Retry gate ------------------------------------------------------------------------------------------
+// "Wait until `at`" that can't go wrong when millis() wraps (24.9 days): the signed comparison is only made
+// while a retry is pending, i.e. for at most the delay after arm(). blocked() clears itself once due.
+struct RetryGate {
+    bool pending = false;
+    uint32_t at = 0;
+    void arm(uint32_t now, uint32_t delayMs) {
+        pending = true;
+        at = now + delayMs;
+    }
+    void clear() { pending = false; }
+    bool blocked(uint32_t now) {
+        if (!pending) return false;
+        if (static_cast<int32_t>(now - at) < 0) return true;
+        pending = false;
+        return false;
+    }
+};
+
 } // namespace calc
 } // namespace dayhist

@@ -1120,6 +1120,35 @@ static void testDayHistoryCalc() {
 #endif
 }
 
+// ---- day_history_calc.h: merge and retry gate -----------------------------------------------------------
+static void testDayHistoryMergeRetry() {
+    using namespace dayhist::calc;
+    // merge: per-bin max, never a sum (card copy and live bins can cover the same hour)
+    float live[4] = {1.0f, 0.0f, 2.5f, 0.0f};
+    const float card[4] = {1.0f, 0.7f, 2.0f, 0.0f};
+    mergeBins(live, card, 4);
+    CHECK(live[0] == 1.0f && live[1] == 0.7f && live[2] == 2.5f && live[3] == 0.0f);
+    float x = 3.0f;
+    mergeMax(x, 3.0f);
+    CHECK(x == 3.0f); // identical copies don't double
+    mergeMax(x, 4.0f);
+    CHECK(x == 4.0f);
+    // retry gate: idle gate never blocks, even with a huge "now" (millis() wrapped long ago)
+    RetryGate g;
+    CHECK(!g.blocked(0) && !g.blocked(0x80000000u) && !g.blocked(0xFFFFFFFFu));
+    g.arm(1000, 10000);
+    CHECK(g.blocked(1000) && g.blocked(10999) && !g.blocked(11000));
+    CHECK(!g.blocked(11001) && !g.pending); // cleared itself once due
+    // 24.9 days later the signed difference would flip: an idle gate must not care
+    CHECK(!g.blocked(1000u + 0x80000000u));
+    // armed across the wrap
+    g.arm(0xFFFFFF00u, 10000);
+    CHECK(g.blocked(0xFFFFFFF0u) && g.blocked(5) && !g.blocked(10000));
+    g.arm(5, 10000);
+    g.clear();
+    CHECK(!g.blocked(6));
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
@@ -1131,6 +1160,7 @@ int main(int argc, char **argv) {
     testBacklightCurve();
     testSettingsCodec();
     testDayHistoryCalc();
+    testDayHistoryMergeRetry();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }
