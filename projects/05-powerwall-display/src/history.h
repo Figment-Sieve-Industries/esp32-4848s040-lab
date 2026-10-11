@@ -8,6 +8,7 @@
 #include <Arduino.h>
 #include <time.h>
 #include "backlight_curve.h"
+#include "settings_codec.h"
 
 // Start the SD task. Call once in setup(), AFTER board4848::initDisplay() (SD shares the LCD's
 // init-bus pins). The card is mounted asynchronously; no card is fine (polled every 2 s).
@@ -41,10 +42,14 @@ bool historyLoadBaseline(void *data, size_t len);
 // ---- Settings (saved on the card; defaults until a card is read) ----
 struct AppSettings {
     uint8_t brightnessPct = blcurve::PCT_DEFAULT; // brightness slider position 0..100 (see backlight_curve.h)
+    uint16_t screenMask = setcodec::ALL_SCREENS;  // bit per ui::ScreenIndex: 1 = shown (settings_codec.h)
 };
 AppSettings settingsGet();
 // Sets the slider position (0..100, clamped), applies the backlight through the gamma curve immediately
 // and queues a save to the card.
 void settingsSetBrightness(int pct);
+// Switches one optional screen on or off (always-on screens are ignored) and queues a save. main.cpp applies
+// the new mask (navigation, page dots, background jobs) on its next refresh tick.
+void settingsSetScreenEnabled(int screenIndex, bool on);
 // Applies the current setting to the backlight (call after the PWM frequency or resolution changed, and at boot).
 void settingsApplyBacklight();

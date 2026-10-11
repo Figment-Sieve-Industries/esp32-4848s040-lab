@@ -2,6 +2,7 @@
 #include "icons.h"
 #include "powerwall.h"
 #include "secrets.h" // WEATHER_NAME (placeName)
+#include "settings_codec.h"
 #include <Arduino.h>
 #include <src/core/lv_global.h> // private: anim list access for pauseScreenAnimations
 #include <math.h>
@@ -46,6 +47,9 @@ uint32_t s_showDelayMs = 0;
 
 // Top bars made by screenCreate(index), updated centrally by main
 TopBar s_bars[SCREEN_COUNT];
+// Page dots: s_dots[page][i] = the dot for screen i on page `page` (null until that page is created)
+lv_obj_t *s_dots[SCREEN_COUNT][SCREEN_COUNT];
+uint16_t s_dotMask = setcodec::ALL_SCREENS; // screens whose dots are currently shown
 bool s_haveBar[SCREEN_COUNT];
 
 void gestureCb(lv_event_t *) {
@@ -225,8 +229,23 @@ void pageDots(lv_obj_t *scr, int active) {
         lv_obj_set_style_radius(d, 4, 0);
         lv_obj_set_style_bg_color(d, i == active ? TEXT : TRACK, 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+        // One dot per screen on every page; disabled screens' dots are hidden (setScreenMask), which makes the
+        // flex row close the gap and re-centre.
+        if (active >= 0 && active < SCREEN_COUNT) s_dots[active][i] = d;
+        if (!setcodec::screenOn(s_dotMask, i)) lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 456);
+}
+
+void setScreenMask(uint16_t mask) {
+    mask = setcodec::normalizeMask(mask);
+    if (mask == s_dotMask) return; // only touch the dots when the set of screens changes
+    s_dotMask = mask;
+    for (int page = 0; page < SCREEN_COUNT; page++) {
+        for (int i = 0; i < SCREEN_COUNT; i++) {
+            if (s_dots[page][i]) setHidden(s_dots[page][i], !setcodec::screenOn(mask, i));
+        }
+    }
 }
 
 void animPulse(lv_obj_t *obj, uint32_t periodMs) { loop(obj, opaBg, LV_OPA_COVER, 90, periodMs); }
