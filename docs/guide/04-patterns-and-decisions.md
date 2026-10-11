@@ -263,9 +263,9 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 ### ADR-23: HTTP/1.0 for one-shot GETs; keep-alive is opt-in
 
 - **Context.** HTTP/1.1 servers answer with chunked bodies, which need a correct chunk reader. HTTP/1.0 gets a plain body that ends at Content-Length or when the server closes. The gateway's `/aggregates` is chunked under HTTP/1.1, and a handshake per poll is expensive.
-- **Decision.** Every one-shot fetch uses HTTP/1.0 with connection close (`Options::keepAlive = false`). Keep-alive is opt-in per session: only the ENSO job uses it today (several requests to one host in one job). The gateway poll defaults to HTTP/1.0 (a handshake per 2 s poll); `-DPW_GW_KEEPALIVE=1` switches to HTTP/1.1 reuse with `net::readBody`, off until a soak shows no watchdog resets.
+- **Decision.** Every one-shot fetch uses HTTP/1.0 with connection close (`Options::keepAlive = false`). Keep-alive is opt-in per session: only the ENSO job uses it today (several requests to one host in one job). The gateway poll defaults to HTTP/1.0 (a handshake per 2 s poll); `PW_GW_KEEPALIVE=1` switches to HTTP/1.1 reuse with `net::readBody`. **Update 2026-10-11 (`c9a6630`): keep-alive is now the default** after a 10-minute soak: 22 TLS connects instead of 275, 1 handshake refusal instead of 19, 59 fps, no watchdog resets. `-DPW_GW_KEEPALIVE=0` restores the one-shot path.
 - **Alternatives.** Keep-alive everywhere to save handshakes: higher reward but the stall risk (ADR-07). Persistent connection with a custom parser: that is the opt-in path.
-- **Consequences.** A 10 minute serial run counted about 270 TLS connections and 0 failures at the default. Each handshake is a burst of CPU and internal-RAM churn, which is the cost kept in exchange for robustness. The keep-alive path exists and is counted but has not had a long soak.
+- **Consequences.** A 10 minute serial run counted about 270 TLS connections and 0 failures at the default. Each handshake is a burst of CPU and internal-RAM churn, which is the cost kept in exchange for robustness. The keep-alive default has had a 10-minute soak, not yet a long one (several hours: projects/README.md follow-up).
 - **Evidence.** `powerwall.cpp` (`PW_GW_KEEPALIVE`), `powerwall.h`, [07-gotchas.md](../07-gotchas.md) ("JSON from an HTTP API parses as a number"). Write-up: [inv-httpclient-chunked-stall](03-investigations.md#inv-httpclient-chunked-stall).
 
 ### ADR-24: Job budget below the staleness limit
@@ -355,9 +355,9 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 ### ADR-34: SD cache of fetched data
 
 - **Context.** After a reboot every screen is empty until each source is fetched again, which takes minutes with one TLS session at a time. Sources should not be fetched again while their data is still fresh.
-- **Decision (contract only).** `cache.h` defines the design: files `/powerwall/cache/<name>.bin`, written with `writeAtomic`. A record is a 24-byte header (magic `PWC1`, version, size, fetched UTC) plus a plain-data payload. A record is accepted only if magic, version and size match, so a changed struct is ignored rather than misread. Time is stored as UTC and converted back to `millis()` age on load (`msFromUtc`), so the existing staleness checks still work. `dueInMs` lets the scheduler skip jobs that are still inside their window.
+- **Decision.** `cache.h` defines the design, `cache.cpp` implements it: files `/powerwall/cache/<name>.bin`, written with `writeAtomic`. A record is a 24-byte header (magic `PWC1`, version, size, fetched UTC) plus a plain-data payload. A record is accepted only if magic, version and size match, so a changed struct is ignored rather than misread. Time is stored as UTC and converted back to `millis()` age on load (`msFromUtc`), so the existing staleness checks still work. `dueInMs` lets the scheduler skip jobs that are still inside their window.
 - **Alternatives.** Cache in RTC memory: lost on power cut. Cache on internal flash: ADR-28.
-- **Consequences.** Status: **the pure helpers and the contract are in the tree; `cache.cpp` (the card I/O) is not there yet**, so the data is not cached today. Treat this as `wip`. Version numbers must be bumped when a cached struct changes meaning.
+- **Consequences.** Status: works on hw (2026-10-11, `c9a6630`): all 7 records restore about 2 s after boot (at SD mount, without waiting for the clock) and fresh ones skip their first fetch; serial `c` lists them. Version numbers must be bumped when a cached struct changes meaning.
 - **Evidence.** `projects/05-powerwall-display/src/cache.h`.
 
 ### ADR-35: Day history: month files with fixed slots and per-slot CRC
@@ -468,9 +468,9 @@ These came up while writing this guide, and have no settled answer in the repo.
 |---|---|
 | Arduino versus ESP-IDF | Reasoning only (doc 06 and doc 12), no decision. Triggers for moving are listed in doc 12 section 5 |
 | `LV_ATTRIBUTE_FAST_MEM` in network projects | Rejected while mbedTLS was internal-only; not re-measured since the allocator hook (ADR-16) |
-| Gateway keep-alive (`PW_GW_KEEPALIVE`) | Implemented, default off, not soaked (ADR-23) |
+| Gateway keep-alive (`PW_GW_KEEPALIVE`) | Default on since `c9a6630`; 10-minute soak only, long soak pending (ADR-23) |
 | Exact write-back in the rotated flush (turn `auto_flush` off) | Proposed; not done (ADR-14) |
-| SD cache I/O (`cache.cpp`) | Contract only (ADR-34) |
+| SD cache I/O (`cache.cpp`) | Works on hw; restores at SD mount (ADR-34) |
 | Pinned CA versus the certificate bundle | Not evaluated (ADR-25) |
 | Why the gateway poll period is 2 s | Not recorded; it matches the gateway's own update rate as far as seen, but no source says so |
 | PCLK 12 MHz | Taken from Arduino_GFX's config for this board; 8 to 16 MHz is the quoted safe range; no sweep was made here |

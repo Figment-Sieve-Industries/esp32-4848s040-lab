@@ -2,7 +2,8 @@
 // Per-day energy history for the history screen (day / week / month charts).
 //
 // Data: one DayRecord per local date (day totals + 24 hourly bins), kept on the SD card in month files
-// /powerwall/days/YYYY-MM.bin (31 fixed slots, slot = day of month - 1, written with sdcard::writeAtomic).
+// /powerwall/days/YYYY-MM.bin (31 fixed slots, slot = day of month - 1; replaced via a .tmp file + rename, because
+// sdcard::writeAtomic is capped at 4 KB - see day_history.cpp).
 // Today's record is built live on the UI thread from the gateway's lifetime counters (dayHistoryUpdate)
 // and mirrored in RTC memory; the SD task saves it every hour, every 10 minutes and at midnight.
 // Past days are only ever read on the SD task (dayHistorySdTick); the UI never touches the card.
