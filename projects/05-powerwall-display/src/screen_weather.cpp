@@ -25,6 +25,7 @@ lv_obj_t *s_hourCol[HOURS], *s_hourLbl[HOURS], *s_hourIco[HOURS], *s_hourTemp[HO
 int s_hourIconKey[HOURS];
 int s_bigIconKey = -1;
 lv_obj_t *s_lifeCard, *s_lifeVal[3];
+lv_obj_t *s_sunUp, *s_sunDown; // sunrise / sunset times, right of the place caption
 lv_obj_t *s_place; // location caption (ui::placeName: privacy mode shows a placeholder)
 
 // Fixed-size flex container, children aligned to the start
@@ -74,6 +75,16 @@ lv_obj_t *weatherCreate() {
 
     s_place = ui::caption(scr, ui::MUTED, ui::placeName());
     lv_obj_set_pos(s_place, 24, 54);
+
+    // Sunrise / sunset, right-aligned on the place caption line
+    lv_obj_t *sun = ui::flex(scr, LV_FLEX_FLOW_ROW, 4, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_size(sun, LV_SIZE_CONTENT, 16);
+    lv_obj_align(sun, LV_ALIGN_TOP_RIGHT, -24, 52);
+    iconCreate(sun, Icon::Sun, 14, ui::C_SOLAR, 1.4f);
+    iconCreate(sun, Icon::ArrowUp, 12, ui::MUTED, 1.6f);
+    s_sunUp = ui::label(sun, &lv_font_montserrat_14, ui::MUTED, "--:--");
+    iconCreate(sun, Icon::ArrowDown, 12, ui::MUTED, 1.6f);
+    s_sunDown = ui::label(sun, &lv_font_montserrat_14, ui::MUTED, "--:--");
 
     // Current conditions row
     lv_obj_t *row = ui::flex(scr, LV_FLEX_FLOW_ROW, 16);
@@ -139,6 +150,11 @@ void weatherRefresh() {
         ui::setText(s_lblFeels, "Feels -- / Wind --");
         ui::setText(s_lblHiLo, "H -- / L --");
     }
+
+    if (wxOk && w.sunriseMin >= 0) ui::setTextF(s_sunUp, "%02d:%02d", w.sunriseMin / 60, w.sunriseMin % 60);
+    else ui::setText(s_sunUp, "--:--");
+    if (wxOk && w.sunsetMin >= 0) ui::setTextF(s_sunDown, "%02d:%02d", w.sunsetMin / 60, w.sunsetMin % 60);
+    else ui::setText(s_sunDown, "--:--");
 
     for (int i = 0; i < HOURS; i++) {
         const WeatherHour &h = w.hours[i];

@@ -74,11 +74,13 @@ struct WeatherData {
     int cloudPct = -1;          // current total cloud cover % (-1 unknown)
     int code = -1;              // WMO weather code
     bool isDay = true;
+    int sunriseMin = -1;        // today's sunrise, local minutes since midnight (-1 unknown)
+    int sunsetMin = -1;         // today's sunset, same
     WeatherHour hours[6];       // now, +2 h ... +10 h
     uint32_t updatedMs = 0;
 };
 // SD cache record version (cache.h). Bump when a field's meaning or units change; a size change is caught anyway.
-constexpr uint16_t WEATHER_CACHE_VERSION = 1;
+constexpr uint16_t WEATHER_CACHE_VERSION = 2;
 
 struct NetStatus {
     bool wifiUp = false;
