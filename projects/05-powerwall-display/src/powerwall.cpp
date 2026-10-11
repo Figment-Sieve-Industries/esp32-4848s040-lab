@@ -302,7 +302,7 @@ bool fetchWeather() {
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
              "&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,cloud_cover"
-             "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+             "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"
              "&hourly=temperature_2m,weather_code,is_day&forecast_hours=11&forecast_days=1&timezone=auto",
              (double)WEATHER_LAT, (double)WEATHER_LON);
     HeapBuf body;
@@ -337,6 +337,11 @@ bool fetchWeather() {
     w.windKmh = doc["current"]["wind_speed_10m"] | 0.0f;
     w.rainPct = doc["daily"]["precipitation_probability_max"][0] | -1;
     w.cloudPct = doc["current"]["cloud_cover"] | -1;
+    // "2026-10-11T07:24" (local time, timezone=auto) -> minutes since midnight
+    const char *sr = doc["daily"]["sunrise"][0] | "";
+    const char *ss = doc["daily"]["sunset"][0] | "";
+    if (strlen(sr) >= 16) w.sunriseMin = atoi(sr + 11) * 60 + atoi(sr + 14);
+    if (strlen(ss) >= 16) w.sunsetMin = atoi(ss + 11) * 60 + atoi(ss + 14);
     // Hourly from the current hour: take every 2nd entry -> now, +2 ... +10 h
     JsonArray times = doc["hourly"]["time"];
     for (int i = 0; i < 6; i++) {
