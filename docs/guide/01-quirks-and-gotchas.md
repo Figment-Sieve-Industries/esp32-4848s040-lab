@@ -95,6 +95,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-LVGL-05](#q-lvgl-05) | Objects are clickable by default and swallow taps and swipes | F | LVGL 9 |
 | [Q-LVGL-06](#q-lvgl-06) | Hidden screens keep animating | F | LVGL 9 |
 | [Q-LVGL-07](#q-lvgl-07) | Image cache is keyed by the descriptor | D | LVGL 9 |
+| [Q-LVGL-08](#q-lvgl-08) | Not every running animation's `var` is an object | F | Code that walks LVGL's animation list |
 
 ### PERF: performance
 
@@ -543,6 +544,14 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Fix:** `lv_image_cache_drop(&s_dsc); lv_obj_invalidate(s_img);` when the picture changes (`screen_sun.cpp`).
 - **Evidence:** Code only (unverified as a failure).
 - **Status:** documented. **Applies to:** LVGL 9 with in-RAM images that change.
+
+<a id="q-lvgl-08"></a>
+### Q-LVGL-08 Not every running animation's `var` is an object
+- **Symptom:** (Latent, found in review.) Changing screens within ~150 ms of releasing the brightness slider could crash (LoadProhibited).
+- **Root cause:** `pauseScreenAnimations` (Q-LVGL-06) read every running `lv_anim_t::var` as an `lv_obj_t *`. LVGL 9.5 style transitions use `var = trans_t *` (`lv_obj_style.c`), and the default theme adds transitions to e.g. the slider knob. Read as an object, its "parent" is garbage; `LV_USE_ASSERT_OBJ` is off, so nothing catches it.
+- **Fix:** every app animation is tagged with `ui::animTag()` (`lv_anim_set_user_data` = a static marker) in `ui_common.cpp`, `icons.cpp`, `ui_chart.cpp`, `screen_today.cpp`, `screen_health.cpp`; `pauseScreenAnimations` touches only tagged animations and also checks `lv_obj_is_valid()`. New animations must call `ui::animTag()`.
+- **Evidence:** Cold code review, 2026-10-11, confirmed against the LVGL 9.5 source. Not reproduced on the device (needs a touch on the slider).
+- **Status:** fixed. **Applies to:** any code that walks LVGL's animation list.
 
 ---
 
