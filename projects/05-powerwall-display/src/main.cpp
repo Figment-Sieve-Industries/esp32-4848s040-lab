@@ -71,6 +71,14 @@ static void refreshCb(lv_timer_t *) {
 static uint32_t s_frames; // only touched on the LVGL core
 static void frameCb(lv_event_t *) { s_frames++; }
 
+// Boot trace of internal RAM per step, to see who uses it
+static void memStep(const char *what) {
+    static size_t prev = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    Serial.printf("  [mem] %-10s internal free %6u (%+d)\n", what, (unsigned)now, (int)now - (int)prev);
+    prev = now;
+}
+
 static void halt(const char *msg) {
     Serial.println(msg);
     while (true) delay(1000);
@@ -79,26 +87,36 @@ static void halt(const char *msg) {
 void setup() {
     Serial.begin(115200);
     delay(300);
+    memStep("boot");
 
     gfx = board4848::initDisplay(SCREEN_ROTATION);
     if (!gfx) halt("Display init failed (PSRAM missing? check memory_type = qio_opi)");
     gfx->fillScreen(RGB565_BLACK);
+    memStep("display");
     board4848::setBacklight(settingsGet().brightness); // default until the card's settings are read
 
     // After initDisplay(): the SD card shares the LCD init-bus pins. Mounts in the background.
     historyStart();
+    memStep("sd task");
 
     bool hasTouch = touch.begin();
     touch.setRotation(SCREEN_ROTATION);
     lv_display_t *disp = board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr);
     if (!disp) halt("LVGL draw buffer alloc failed");
+    memStep("lvgl");
     lv_display_add_event_cb(disp, frameCb, LV_EVENT_REFR_READY, nullptr);
 
-    for (auto &s : screens) s.obj = s.create();
+    static const char *const kNames[ui::SCREEN_COUNT] = {"house", "today", "health", "weather",
+                                                        "moon", "aurora", "settings", "about"};
+    for (int i = 0; i < ui::SCREEN_COUNT; i++) {
+        screens[i].obj = screens[i].create();
+        memStep(kNames[i]);
+    }
     lv_screen_load(screens[0].obj);
     for (int i = 1; i < ui::SCREEN_COUNT; i++) ui::pauseScreenAnimations(screens[i].obj, true);
 
     powerwallStart(2000);
+    memStep("net tasks");
     lv_timer_create(refreshCb, 500, nullptr);
 
     Serial.printf("Free internal heap: %lu, PSRAM: %lu\n", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

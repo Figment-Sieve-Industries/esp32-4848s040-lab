@@ -386,7 +386,11 @@ struct Job {
 template <typename F> bool withTls(F fn) {
     xSemaphoreTake(s_tlsLock, portMAX_DELAY);
     s_gwClient.stop();
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t minBefore = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
     bool ok = fn();
+    Serial.printf("  [tls] job free before %u, min ever %u -> %u\n", (unsigned)before, (unsigned)minBefore,
+                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)); // TLS low-water per job
     xSemaphoreGive(s_tlsLock);
     return ok;
 }
