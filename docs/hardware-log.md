@@ -19,7 +19,8 @@ What has been verified on real units. Add an entry each time something is tested
 | Restart quirk | Restarting via `ESP.restart()` from the 03 launcher once came back as `RTCWDT_RTC_RST` (RTC watchdog) instead of a software reset. It recovered by itself. Suspected: restarting while the RGB panel DMA is running. Not fixed yet |
 | Wi-Fi + HTTPS | Joins the home 2.4 GHz network (2.4 GHz, ch 13, ≈ −60 dBm). HTTPS to the Powerwall gateway works with TLS and the LVGL UI running (~140 KB internal heap free while polling) |
 | 05 Powerwall display | 4 LVGL screens + Wi-Fi + 2 TLS endpoints: ~188 KB internal free at boot, ~140 KB polling, 20-50 fps. Powerwall 3 fw 26.26.4 basic LAN API: only meters/aggregates, soe and grid_status answer (all else 404); aggregates include voltage, frequency, reactive/apparent power and lifetime Wh counters |
-| Not yet tested | Corner accuracy, backlight cut-out below 100, SD card, audio, relays, battery |
+| SD card (06-sd-card-test, 2026-10-11) | Works in SPI mode on its own bus after display init. **Core 3.2.1 SD driver bug:** no busy-wait after the multi-block Stop Tran token, so large writes failed intermittently at every clock (1-25 MHz); fixed in `common/lib/SD`. 16 GB SDHC (CID maker 0x82 "JT" "NCard", 2014, class 10/U1): 19/19 tests at 20-25 MHz, 1 MB write ~670 KB/s, read ~1.47 MB/s, log append ~17 ms. 2 GB SanDisk SU02G SDSC (2011, no class): corrupt responses above 4 MHz, flaky at 4 MHz, retired. Backlight off made no difference (not a supply problem). Hot-swap: pull/re-insert recovers without reset; inserting a card can briefly drop the PC's CH340 USB link |
+| Not yet tested | Corner accuracy, backlight cut-out below 100, audio, relays, battery |
 
 ### LVGL benchmark, unit 1 (2026-10-10)
 Setup: `03-lvgl-demos`, LVGL 9.5.0, Arduino core 3.2.1 (`-Os`), partial render with a 48-line internal-RAM buffer, flush via `draw16bitRGBBitmap` into a single PSRAM framebuffer, 12 MHz PCLK, bounce buffers 480×10.

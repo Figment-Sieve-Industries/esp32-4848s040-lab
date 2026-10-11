@@ -1,0 +1,7 @@
+{
+  "name": "SdStore",
+  "version": "0.1.0",
+  "description": "Robust microSD access for the ESP32-4848S040: own SPI bus, hot-swap via polling, per-card clock self-tuning, power-cut-safe atomic files. Needs the patched SD library in common/lib/SD.",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
