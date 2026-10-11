@@ -78,5 +78,5 @@ PwData powerwallData();
 NetStatus networkStatus();
 WeatherData weatherData();
 
-// Diagnostics: minimum free stack (bytes) seen so far in the gateway and weather tasks.
-void netTaskStackFree(uint32_t &gwBytes, uint32_t &wxBytes);
+// Diagnostics: minimum free stack (bytes) seen so far in the network task.
+uint32_t netTaskStackFree();

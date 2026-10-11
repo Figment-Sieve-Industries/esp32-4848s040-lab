@@ -1,5 +1,5 @@
 #pragma once
-// Sky data for the moon and aurora screens, fetched by the weather task (core 0):
+// Sky data for the moon and aurora screens, fetched by the network task (core 0):
 // - AuroraWatch UK (Lancaster University): alert level + last 24 h of hourly activity, plain HTTP
 // - NOAA SWPC planetary Kp (observed + 3-day forecast), HTTPS
 // - MET Norway: moonrise / moonset for the configured location, HTTPS, once per local day
@@ -55,8 +55,8 @@ MoonTimes moonTimes();
 // Data older than this is shown as stale ("--" / dimmed).
 constexpr uint32_t SKY_STALE_MS = 2UL * 60UL * 60UL * 1000UL; // 2 h (fetched every 30 min)
 
-// ---- Fetchers, called only by the weather task in powerwall.cpp ----
-// fetchAurora() is plain HTTP; the other two use TLS and must run while holding the TLS lock.
+// ---- Fetchers, called only by the network task in powerwall.cpp ----
+// fetchAurora() is plain HTTP; the other two use TLS (one session at a time on that task).
 bool skyFetchAurora();
 bool skyFetchKp();
 bool skyFetchMoon();

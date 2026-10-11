@@ -28,6 +28,14 @@ lv_obj_t *auroraCreate();   // aurora (UK): AuroraWatch level, 24 h activity, Kp
 void auroraRefresh();
 void auroraOnShow();
 
+lv_obj_t *sunCreate();      // sun (R): SOHO photo, flare class/odds, R/S/G scales, solar wind, sunspots
+void sunRefresh();
+void sunOnShow();
+
+lv_obj_t *ensoCreate();     // El Nino (S): CPC alert, weekly Nino 3.4, ONI/RONI, monthly history, odds
+void ensoRefresh();
+void ensoOnShow();
+
 lv_obj_t *settingsCreate(); // settings: brightness, SD card status
 void settingsRefresh();
 void settingsOnShow();

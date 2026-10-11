@@ -2,8 +2,8 @@
 // Live Tesla Powerwall 3 dashboard on the 4" panel, read from the gateway's local LAN API.
 // Network polling runs on core 0 (powerwall.cpp); LVGL runs in loop() on core 1.
 //
-// Screens (swipe left/right): power flow, today, battery & grid, weather, moon, aurora, settings,
-// about (see ui::ScreenIndex).
+// Screens (swipe left/right): power flow, today, battery & grid, weather, moon, aurora, sun, El Nino,
+// settings, about (see ui::ScreenIndex).
 //
 // SCREEN_ROTATION: 0 = native, 1 = 90 deg clockwise, 2 = 180, 3 = 90 deg counter-clockwise.
 // 3 puts the USB-C port at the bottom. Touch is rotated to match.
@@ -23,6 +23,10 @@
 #define SCREEN_ROTATION 3
 #endif
 
+// LVGL renders in loopTask: the default 8 KB left under 1 KB free (and overflowed once with LVGL's
+// JPEG decoder registered). The heartbeat prints what is left ("stack free ... lvgl").
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 static Arduino_RGB_Display *gfx;
 static board4848::Touch touch;
 
@@ -40,6 +44,8 @@ static ScreenDef screens[ui::SCREEN_COUNT] = {
     {weatherCreate, weatherRefresh, weatherOnShow, nullptr},
     {moonCreate, moonRefresh, moonOnShow, nullptr},
     {auroraCreate, auroraRefresh, auroraOnShow, nullptr},
+    {sunCreate, sunRefresh, sunOnShow, nullptr},
+    {ensoCreate, ensoRefresh, ensoOnShow, nullptr},
     {settingsCreate, settingsRefresh, settingsOnShow, nullptr},
     {aboutCreate, aboutRefresh, nullptr, nullptr},
 };
@@ -103,11 +109,13 @@ void setup() {
     touch.setRotation(SCREEN_ROTATION);
     lv_display_t *disp = board4848::lvglBegin(gfx, hasTouch ? &touch : nullptr);
     if (!disp) halt("LVGL draw buffer alloc failed");
+    // LV_USE_TJPGD only for space.cpp's raw decoder: don't let LVGL sniff every image it draws for JPEG
+    lv_tjpgd_deinit();
     memStep("lvgl");
     lv_display_add_event_cb(disp, frameCb, LV_EVENT_REFR_READY, nullptr);
 
     static const char *const kNames[ui::SCREEN_COUNT] = {"house", "today", "health", "weather",
-                                                        "moon", "aurora", "settings", "about"};
+                                                        "moon", "aurora", "sun", "enso", "settings", "about"};
     for (int i = 0; i < ui::SCREEN_COUNT; i++) {
         screens[i].obj = screens[i].create();
         memStep(kNames[i]);
@@ -137,18 +145,17 @@ void loop() {
         PwData d = powerwallData();
         NetStatus n = networkStatus();
         TodayStats t = energyToday();
-        uint32_t gwStack, wxStack;
-        netTaskStackFree(gwStack, wxStack);
+        uint32_t netStack = netTaskStackFree();
         Serial.printf("[%s %d dBm] solar %.0f home %.0f grid %.0f batt %.0f soc %.1f%% %s %s | today solar %.2f home %.2f "
                       "kWh | screen %d | %.1f fps\n",
                       n.wifiUp ? n.ssid : "offline", n.rssi, d.solarW, d.loadW, d.siteW, d.batteryW, d.soc,
                       d.gridConnected ? "on-grid" : "OFF-GRID", d.error, t.solarKWh, t.homeKWh, current, frames / 10.0f);
         // Long-uptime health: fragmentation shows as a shrinking largest block
-        Serial.printf("  mem: internal free %lu, largest block %lu, min ever %lu | stack free gw %lu wx %lu\n",
+        Serial.printf("  mem: internal free %lu, largest block %lu, min ever %lu | stack free net %lu lvgl %lu\n",
                       (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                       (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-                      (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)gwStack,
-                      (unsigned long)wxStack);
+                      (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL), (unsigned long)netStack,
+                      (unsigned long)uxTaskGetStackHighWaterMark(nullptr));
         lv_mem_monitor_t lm;
         lv_mem_monitor(&lm);
         SdStatus sd = historyStatus();

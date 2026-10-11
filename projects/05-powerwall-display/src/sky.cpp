@@ -1,8 +1,9 @@
 // Aurora (AuroraWatch UK), Kp (NOAA SWPC) and moonrise/moonset (MET Norway) - see sky.h.
-// Called from the weather task in powerwall.cpp, which schedules them and holds the TLS lock
-// for the HTTPS ones. Results are swapped in under s_lock only when a response parses completely.
+// Called from the network task in powerwall.cpp, which schedules them (one TLS session at a time).
+// Results are swapped in under the lock only when a response parses completely.
 #include "sky.h"
 #include "ca_certs.h"
+#include "psram_json.h"
 #include "secrets.h"
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -206,11 +207,11 @@ bool skyFetchKp() {
     client.stop();
     if (!ok) return false;
 
-    JsonDocument filter;
+    JsonDocument filter(psramJson());
     filter[0]["time_tag"] = true;
     filter[0]["kp"] = true;
     filter[0]["observed"] = true;
-    JsonDocument doc;
+    JsonDocument doc(psramJson());
     if (deserializeJson(doc, body, DeserializationOption::Filter(filter)) || !doc.is<JsonArray>()) {
         Serial.println("Sky: Kp response did not parse");
         return false;
@@ -287,7 +288,7 @@ bool skyFetchMoon() {
     client.stop();
     if (!ok) return false;
 
-    JsonDocument doc;
+    JsonDocument doc(psramJson());
     if (deserializeJson(doc, body) || !doc["properties"].is<JsonObject>()) {
         Serial.println("Sky: moon response did not parse");
         return false;

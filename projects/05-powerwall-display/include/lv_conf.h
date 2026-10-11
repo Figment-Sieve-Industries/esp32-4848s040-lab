@@ -38,6 +38,9 @@
 #define LV_FONT_MONTSERRAT_48 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_16
 
+// TJpgDec (bundled): space.cpp decodes the SOHO sun JPEG with its raw jd_prepare/jd_decomp API
+#define LV_USE_TJPGD 1
+
 #define LV_BUILD_EXAMPLES 0
 
 #endif

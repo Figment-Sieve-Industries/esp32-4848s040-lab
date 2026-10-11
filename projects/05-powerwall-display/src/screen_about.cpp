@@ -24,7 +24,9 @@ const char *const CREDITS[] = {
     "Powerwall data: Tesla Powerwall gateway (local LAN API)",
     "Weather: Open-Meteo.com (CC BY 4.0)",
     AURORA_CREDIT,
-    "Kp index: NOAA Space Weather Prediction Center",
+    "Kp, flares, solar wind, sunspots: NOAA Space Weather Prediction Center",
+    "Sun photo: SOHO (ESA & NASA)",
+    "El Nino data: NOAA Climate Prediction Center",
     "Moonrise/moonset: MET Norway (CC BY 4.0)",
     MOON_PHOTO_CREDIT,
     "Moon phase: computed on-device (Meeus, Astronomical Algorithms)",
@@ -55,9 +57,9 @@ lv_obj_t *aboutCreate() {
     lv_obj_set_width(list, INNER_W);
     lv_obj_set_height(list, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(list, 6, 0);
+    lv_obj_set_style_pad_row(list, 5, 0);
     for (const char *c : CREDITS) {
-        lv_obj_t *l = ui::label(list, &lv_font_montserrat_14, ui::MUTED, c);
+        lv_obj_t *l = ui::label(list, &lv_font_montserrat_12, ui::MUTED, c); // 12: nine credits fit the card
         lv_obj_set_width(l, INNER_W);
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
     }

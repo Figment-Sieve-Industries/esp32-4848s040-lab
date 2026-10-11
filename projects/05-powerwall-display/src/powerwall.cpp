@@ -5,14 +5,15 @@
 //   GET  /api/system_status/grid_status -> {"grid_status": "SystemGridConnected" | ..., "grid_services_active": ..}
 // 401/403 means the token expired or is missing, so log in again (with back-off on failure).
 //
-// Two tasks on core 0 (LVGL runs on core 1 and never touches the network):
-//  - gwTask polls the gateway every s_pollMs over ONE long-lived HTTPS connection (keep-alive).
-//  - wxTask fetches weather every 15 min with its own client and a pinned CA, and the sky data
-//    (sky.cpp): aurora + Kp every 30 min, moonrise/moonset once a day.
-// s_tlsLock ensures only one TLS session exists at a time (mbedTLS needs ~40-50 KB internal RAM
-// per session): the weather task closes the gateway connection before opening its own.
+// One network task on core 0 (LVGL runs on core 1 and never touches the network). Each pass polls
+// the gateway over its long-lived HTTPS connection, then runs at most one due background job
+// (weather, sky.cpp, space.cpp, enso.cpp), each with its own client and a pinned CA. Being one task
+// means only one TLS session exists at a time: the gateway connection is closed before a job's.
 #include "powerwall.h"
+#include "enso.h"
+#include "psram_json.h"
 #include "sky.h"
+#include "space.h"
 #include "ca_certs.h"
 #include "secrets.h"
 #include <ArduinoJson.h>
@@ -20,6 +21,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiMulti.h>
+#include <esp_heap_caps.h>
+#include <mbedtls/platform.h>
 
 namespace {
 
@@ -31,17 +34,22 @@ constexpr uint32_t WEATHER_READ_TIMEOUT_MS = 5000;
 constexpr uint32_t WEATHER_PERIOD_MS = 15 * 60 * 1000UL;
 constexpr uint32_t SKY_PERIOD_MS = 30 * 60 * 1000UL;   // aurora + Kp
 constexpr uint32_t SKY_RETRY_MS = 5 * 60 * 1000UL;     // after a failed sky fetch
+constexpr uint32_t SUN_IMAGE_PERIOD_MS = 60 * 60 * 1000UL;
+constexpr uint32_t SUN_IMAGE_RETRY_MS = 10 * 60 * 1000UL;
+constexpr uint32_t ENSO_PERIOD_MS = 12 * 60 * 60 * 1000UL; // CPC updates weekly/monthly
+constexpr uint32_t ENSO_RETRY_MS = 30 * 60 * 1000UL;
 
 WiFiMulti s_wifiMulti;
-SemaphoreHandle_t s_lock;    // protects s_data / s_weather / s_net
-SemaphoreHandle_t s_tlsLock; // one TLS session at a time
+// Protects s_data / s_weather / s_net. Created at static init: the SD task reads powerwallData()
+// before powerwallStart() runs.
+SemaphoreHandle_t s_lock = xSemaphoreCreateMutex();
 PwData s_data;
 WeatherData s_weather;
 NetStatus s_net;
 uint32_t s_pollMs;
-TaskHandle_t s_gwTask, s_wxTask;
+TaskHandle_t s_netTask;
 
-// Gateway connection (gwTask only, or wxTask while holding s_tlsLock to close it)
+// Gateway connection (network task only)
 WiFiClientSecure s_gwClient;
 HTTPClient s_gwHttp;
 String s_token;
@@ -93,7 +101,7 @@ bool login() {
     }
     gwBegin("/api/login/Basic");
     s_gwHttp.addHeader("Content-Type", "application/json");
-    JsonDocument req;
+    JsonDocument req(psramJson());
     req["username"] = "customer";
     req["password"] = PW_CUSTOMER_PASSWORD;
     req["email"] = "";
@@ -104,7 +112,7 @@ bool login() {
     String resp = code == 200 ? s_gwHttp.getString() : String(); // getString() de-chunks
     s_gwHttp.end();
 
-    JsonDocument res;
+    JsonDocument res(psramJson());
     if (code == 200 && !deserializeJson(res, resp) && res["token"].is<const char *>()) {
         s_token = res["token"].as<const char *>();
         s_loginFailures = 0;
@@ -143,7 +151,7 @@ int getJson(const char *path, JsonDocument &doc, const JsonDocument *filter = nu
 }
 
 const JsonDocument &aggregatesFilter() {
-    static JsonDocument filter;
+    static JsonDocument filter(psramJson());
     if (filter.isNull()) {
         for (const char *m : {"site", "battery", "load", "solar"}) {
             filter[m]["instant_power"] = true;
@@ -163,7 +171,7 @@ bool pollOnce() {
 
     // Small fixed-length responses first on the kept-alive connection, then the chunked
     // aggregates as HTTP/1.0 (closes the connection) -> one TLS handshake per poll.
-    JsonDocument agg, soe, grid;
+    JsonDocument agg(psramJson()), soe(psramJson()), grid(psramJson());
     int codeSoe = getJson("/api/system_status/soe", soe);
     if (codeSoe == 401 || codeSoe == 403) {
         s_token = "";
@@ -279,7 +287,7 @@ bool fetchWeather() {
              (double)WEATHER_LAT, (double)WEATHER_LON);
     WiFiClientSecure client;
     client.setCACert(OPEN_METEO_CA); // public internet: verify the server
-    // This runs while holding s_tlsLock, so gateway polling pauses: keep the worst case bounded
+    // This runs on the network task, so gateway polling pauses: keep the worst case bounded
     // (connect 3 s + handshake 5 s + read 5 s) instead of the gateway's 8 s handshake / 8 s read.
     client.setHandshakeTimeout(WEATHER_HANDSHAKE_TIMEOUT_S);
     HTTPClient http;
@@ -295,7 +303,7 @@ bool fetchWeather() {
         Serial.printf("Weather: %s\n", code < 0 ? HTTPClient::errorToString(code).c_str() : String(code).c_str());
         return false;
     }
-    JsonDocument doc;
+    JsonDocument doc(psramJson());
     if (deserializeJson(doc, body) || !doc["current"]["weather_code"].is<int>() ||
         !doc["current"]["temperature_2m"].is<float>()) {
         Serial.println("Weather: incomplete response");
@@ -341,7 +349,52 @@ void updateNetStatus(bool up) {
     xSemaphoreGive(s_lock);
 }
 
-void gwTask(void *) {
+// One scheduled background job: due when millis() reaches `next`.
+struct Job {
+    uint32_t next = 0;
+    bool due(uint32_t now) const { return (int32_t)(now - next) >= 0; }
+    void after(uint32_t now, uint32_t ms) { next = now + ms; }
+};
+
+// Run a TLS job with the gateway's session closed first (one TLS session at a time), logging the
+// internal-RAM low-water mark it reached.
+template <typename F> bool withTls(F fn) {
+    s_gwClient.stop();
+    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t minBefore = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    bool ok = fn();
+    Serial.printf("  [tls] job free before %u, min ever %u -> %u\n", (unsigned)before, (unsigned)minBefore,
+                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    return ok;
+}
+
+// Runs at most one due job per call, so the gateway keeps polling in between.
+void runOneJob() {
+    static Job weather, aurora, kp, moon, swpc, sunImg, enso;
+    static uint32_t weatherRetryMs = 60000;
+    uint32_t now = millis();
+    if (weather.due(now)) {
+        bool ok = withTls(fetchWeather);
+        // 15 min when OK; on failure retry after 1, 2, 4 ... up to 15 min
+        weather.after(millis(), ok ? WEATHER_PERIOD_MS : weatherRetryMs);
+        weatherRetryMs = ok ? 60000 : (weatherRetryMs * 2 > WEATHER_PERIOD_MS ? WEATHER_PERIOD_MS : weatherRetryMs * 2);
+    } else if (aurora.due(now)) {
+        aurora.after(millis(), skyFetchAurora() ? SKY_PERIOD_MS : SKY_RETRY_MS); // plain HTTP
+    } else if (kp.due(now)) {
+        kp.after(millis(), withTls(skyFetchKp) ? SKY_PERIOD_MS : SKY_RETRY_MS);
+    } else if (moon.due(now) && skyMoonNeeded()) {
+        // Once per local day; checked again every 30 min (and after midnight)
+        moon.after(millis(), withTls(skyFetchMoon) ? SKY_PERIOD_MS : SKY_RETRY_MS);
+    } else if (swpc.due(now)) {
+        swpc.after(millis(), withTls(spaceFetchSwpc) ? SKY_PERIOD_MS : SKY_RETRY_MS);
+    } else if (sunImg.due(now)) {
+        sunImg.after(millis(), withTls(spaceFetchSunImage) ? SUN_IMAGE_PERIOD_MS : SUN_IMAGE_RETRY_MS);
+    } else if (enso.due(now)) {
+        enso.after(millis(), withTls(ensoFetch) ? ENSO_PERIOD_MS : ENSO_RETRY_MS);
+    }
+}
+
+void netTask(void *) {
     s_gwClient.setInsecure(); // the gateway uses a self-signed certificate (LAN only)
     s_gwClient.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
     for (;;) {
@@ -366,77 +419,41 @@ void gwTask(void *) {
         updateNetStatus(true);
 
         uint32_t start = millis();
-        xSemaphoreTake(s_tlsLock, portMAX_DELAY);
         pollOnce();
-        xSemaphoreGive(s_tlsLock);
+        // Background jobs need NTP time: TLS certificate validity is checked against it
+        if (time(nullptr) >= 1700000000) runOneJob();
         uint32_t spent = millis() - start;
         vTaskDelay(pdMS_TO_TICKS(spent < s_pollMs ? s_pollMs - spent : 100));
     }
 }
 
-// One scheduled job in wxTask: due when millis() reaches `next`.
-struct Job {
-    uint32_t next = 0;
-    bool due(uint32_t now) const { return (int32_t)(now - next) >= 0; }
-    void after(uint32_t now, uint32_t ms) { next = now + ms; }
-};
-
-// Run fn while holding the TLS lock, with the gateway's session closed first (gwTask is blocked on
-// the lock meanwhile, so it reconnects afterwards).
-template <typename F> bool withTls(F fn) {
-    xSemaphoreTake(s_tlsLock, portMAX_DELAY);
-    s_gwClient.stop();
-    size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    size_t minBefore = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    bool ok = fn();
-    Serial.printf("  [tls] job free before %u, min ever %u -> %u\n", (unsigned)before, (unsigned)minBefore,
-                  (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)); // TLS low-water per job
-    xSemaphoreGive(s_tlsLock);
-    return ok;
+// mbedTLS allocator: blocks of 1 KB and up (record buffers, certificates, big numbers) go to PSRAM,
+// small ones stay internal for speed; either falls back to the other. The core's default forces
+// everything internal (~40-50 KB per session), which was the internal-RAM low point.
+void *tlsCalloc(size_t n, size_t size) {
+    if (size && n > SIZE_MAX / size) return nullptr;
+    const uint32_t ext = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, in = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    bool big = n * size >= 1024;
+    void *p = heap_caps_calloc(n, size, big ? ext : in);
+    return p ? p : heap_caps_calloc(n, size, big ? in : ext);
 }
 
-void wxTask(void *) {
-    Job weather, aurora, kp, moon;
-    uint32_t weatherRetryMs = 60000;
-    for (;;) {
-        if (WiFi.status() != WL_CONNECTED || time(nullptr) < 1700000000) {
-            vTaskDelay(pdMS_TO_TICKS(5000)); // wait for Wi-Fi and NTP (TLS cert validity needs the time)
-            continue;
-        }
-        uint32_t now = millis();
-        if (weather.due(now)) {
-            bool ok = withTls(fetchWeather);
-            // 15 min when OK; on failure retry after 1, 2, 4 ... up to 15 min
-            weather.after(millis(), ok ? WEATHER_PERIOD_MS : weatherRetryMs);
-            weatherRetryMs = ok ? 60000 : (weatherRetryMs * 2 > WEATHER_PERIOD_MS ? WEATHER_PERIOD_MS : weatherRetryMs * 2);
-        } else if (aurora.due(now)) {
-            aurora.after(millis(), skyFetchAurora() ? SKY_PERIOD_MS : SKY_RETRY_MS); // plain HTTP: no TLS lock
-        } else if (kp.due(now)) {
-            kp.after(millis(), withTls(skyFetchKp) ? SKY_PERIOD_MS : SKY_RETRY_MS);
-        } else if (moon.due(now) && skyMoonNeeded()) {
-            // Once per local day; checked again every 30 min (and after midnight)
-            moon.after(millis(), withTls(skyFetchMoon) ? SKY_PERIOD_MS : SKY_RETRY_MS);
-        }
-        // One job per pass, spaced out so the gateway polls in between TLS sessions
-        vTaskDelay(pdMS_TO_TICKS(3000));
-    }
-}
+void tlsFree(void *p) { heap_caps_free(p); }
 
 } // namespace
 
 void powerwallStart(uint32_t pollMs) {
     s_pollMs = pollMs;
-    s_lock = xSemaphoreCreateMutex();
-    s_tlsLock = xSemaphoreCreateMutex();
+    mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree); // before any TLS session exists
+    WiFi.persistent(false); // don't write the Wi-Fi config to NVS (internal flash) at runtime
     WiFi.mode(WIFI_STA);
     WiFi.setHostname("powerwall-display");
     for (const WifiCred &w : WIFI_NETWORKS) s_wifiMulti.addAP(w.ssid, w.password);
     configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com");
-    // Core 0 (Arduino loop/LVGL runs on core 1). TLS needs generous stacks.
+    // Core 0 (Arduino loop/LVGL runs on core 1). TLS + JPEG decode need a generous stack.
     // Idle priority (0): network libraries can busy-wait without yielding (e.g. Stream::readBytes);
     // at priority 0 they time-slice with core 0's idle task, so the task watchdog can't fire.
-    xTaskCreatePinnedToCore(gwTask, "pw_gw", 12288, nullptr, tskIDLE_PRIORITY, &s_gwTask, 0);
-    xTaskCreatePinnedToCore(wxTask, "pw_wx", 10240, nullptr, tskIDLE_PRIORITY, &s_wxTask, 0);
+    xTaskCreatePinnedToCore(netTask, "pw_net", 12288, nullptr, tskIDLE_PRIORITY, &s_netTask, 0);
 }
 
 PwData powerwallData() {
@@ -460,7 +477,4 @@ NetStatus networkStatus() {
     return n;
 }
 
-void netTaskStackFree(uint32_t &gwBytes, uint32_t &wxBytes) {
-    gwBytes = s_gwTask ? uxTaskGetStackHighWaterMark(s_gwTask) : 0;
-    wxBytes = s_wxTask ? uxTaskGetStackHighWaterMark(s_wxTask) : 0;
-}
+uint32_t netTaskStackFree() { return s_netTask ? uxTaskGetStackHighWaterMark(s_netTask) : 0; }
