@@ -15,20 +15,25 @@ A wall-mounted energy monitor for **Tesla Powerwall 3** owners. The ESP32 talks 
   <tr>
     <td align="center"><a href="docs/images/screens/05-0-house.png"><img src="docs/images/screens/05-0-house.png" width="240" alt="Power flow screen: solar, grid, home load and Powerwall as pills around a house, with weather and grid status"></a><br>Power flow</td>
     <td align="center"><a href="docs/images/screens/05-1-today.png"><img src="docs/images/screens/05-1-today.png" width="240" alt="Today screen: self-powered ring, energy totals and solar by hour"></a><br>Today</td>
-    <td align="center"><a href="docs/images/screens/05-2-health.png"><img src="docs/images/screens/05-2-health.png" width="240" alt="Battery and grid screen: state of charge, grid voltage and frequency"></a><br>Battery and grid</td>
+    <td align="center"><a href="docs/images/screens/05-2-history.png"><img src="docs/images/screens/05-2-history.png" width="240" alt="History screen, Day tab: solar by hour, grid import and battery percentage"></a><br>History (day)</td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/images/screens/05-3-weather.png"><img src="docs/images/screens/05-3-weather.png" width="240" alt="Weather screen: current conditions and the next 10 hours"></a><br>Weather</td>
-    <td align="center"><a href="docs/images/screens/05-4-moon.png"><img src="docs/images/screens/05-4-moon.png" width="240" alt="Moon screen: phase, illumination, rise and set"></a><br>Moon</td>
-    <td align="center"><a href="docs/images/screens/05-5-aurora.png"><img src="docs/images/screens/05-5-aurora.png" width="240" alt="Aurora screen: AuroraWatch UK status, 24 hour activity and Kp forecast"></a><br>Aurora (UK)</td>
+    <td align="center"><a href="docs/images/screens/05-3-health.png"><img src="docs/images/screens/05-3-health.png" width="240" alt="Battery and grid screen: state of charge, grid voltage and frequency"></a><br>Battery and grid</td>
+    <td align="center"><a href="docs/images/screens/05-4-weather.png"><img src="docs/images/screens/05-4-weather.png" width="240" alt="Weather screen: current conditions, sunrise and sunset, and the next 10 hours"></a><br>Weather</td>
+    <td align="center"><a href="docs/images/screens/05-5-moon.png"><img src="docs/images/screens/05-5-moon.png" width="240" alt="Moon screen: phase, illumination, rise and set"></a><br>Moon</td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/images/screens/05-6-sun.png"><img src="docs/images/screens/05-6-sun.png" width="240" alt="Sun screen: live SOHO photo, flare class, solar wind and sunspots"></a><br>Sun and space weather</td>
-    <td align="center"><a href="docs/images/screens/05-7-enso.png"><img src="docs/images/screens/05-7-enso.png" width="240" alt="El Nino screen: ENSO status, Nino 3.4 and outlook odds"></a><br>El Nino (ENSO)</td>
-    <td align="center"><a href="docs/images/screens/05-8-settings.png"><img src="docs/images/screens/05-8-settings.png" width="240" alt="Settings screen: brightness slider and SD card status"></a><br>Settings (brightness, SD card)</td>
+    <td align="center"><a href="docs/images/screens/05-6-aurora.png"><img src="docs/images/screens/05-6-aurora.png" width="240" alt="Aurora screen: AuroraWatch UK status, 24 hour activity and Kp forecast"></a><br>Aurora (UK)</td>
+    <td align="center"><a href="docs/images/screens/05-7-sun.png"><img src="docs/images/screens/05-7-sun.png" width="240" alt="Sun screen: live SOHO photo, flare class, solar wind and sunspots"></a><br>Sun and space weather</td>
+    <td align="center"><a href="docs/images/screens/05-8-enso.png"><img src="docs/images/screens/05-8-enso.png" width="240" alt="El Nino screen: ENSO status, Nino 3.4 and outlook odds"></a><br>El Nino (ENSO)</td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/images/screens/05-9-about.png"><img src="docs/images/screens/05-9-about.png" width="240" alt="About screen: data sources and credits"></a><br>About and credits</td>
+    <td align="center"><a href="docs/images/screens/05-9-settings.png"><img src="docs/images/screens/05-9-settings.png" width="240" alt="Settings screen: brightness slider and SD card status"></a><br>Settings (brightness, SD card)</td>
+    <td align="center"><a href="docs/images/screens/05-10-about.png"><img src="docs/images/screens/05-10-about.png" width="240" alt="About screen: data sources and credits"></a><br>About and credits</td>
+    <td align="center"><a href="docs/images/screens/05-2-history-week.png"><img src="docs/images/screens/05-2-history-week.png" width="240" alt="History screen, Week tab: solar and grid import per day"></a><br>History (week)</td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/images/screens/05-2-history-month.png"><img src="docs/images/screens/05-2-history-month.png" width="240" alt="History screen, Month tab: solar and grid import per day"></a><br>History (month)</td>
     <td></td>
     <td></td>
   </tr>
@@ -39,9 +44,11 @@ Screenshots are real framebuffer captures from the board, taken in privacy mode 
 **What it does**
 
 - **Live power flow** from the gateway every 2 seconds: solar, grid, house load and Powerwall power, battery state of charge, grid import or export, voltage, and an off-grid banner during an outage.
-- **Ten swipeable screens:** power flow, today, battery and grid, weather, moon, aurora (UK), sun and space weather, El Nino, settings (SD card status and brightness), and about.
+- **Eleven swipeable screens:** power flow, today, history, battery and grid, weather, moon, aurora (UK), sun and space weather, El Nino, settings (SD card status and brightness), and about.
+- **History charts:** solar and grid import per hour, per day of the week and per day of the month, with the battery level on the day view, a tap-for-readout on every bar and a stepper back through earlier periods. Needs the SD card for anything before today.
+- **Weather** shows today's sunrise and sunset.
 - **Local only.** It uses the same customer login as the gateway's own web page. There is no Tesla cloud account, API key or subscription, and your Powerwall readings are never sent anywhere. The only outside requests are to the public weather and space-weather sources listed below (the weather ones carry your configured location).
-- **SD card logging and cache (optional).** A one-minute CSV log of the readings, today's energy totals that survive a power cut, and a cache of the fetched weather and space data so the screens fill straight after a reboot. Nothing is written to the board's internal flash while it runs.
+- **SD card logging and cache (optional).** A one-minute CSV log of the readings, today's energy totals that survive a power cut, a daily energy record that feeds the history charts, and a cache of the fetched weather and space data so the screens fill straight after a reboot. Nothing is written to the board's internal flash while it runs.
 - **Extras for the curious:** weather and a 10-hour forecast, the moon computed on the device, the UK aurora alert level, Kp index, a live photo of the Sun, and the El Nino outlook.
 
 **Get started:** [`projects/05-powerwall-display/README.md`](projects/05-powerwall-display/README.md) covers what you need, the gateway login, configuration, flashing and troubleshooting.
@@ -60,7 +67,7 @@ Status vocabulary: `idea`, `wip`, `builds`, `works on hw`, `done`. `builds` mean
 | 02 | [lvgl-hello](projects/02-lvgl-hello/) | LVGL 9.5 starting point: a button, a backlight slider and an FPS monitor. The template for UI projects. | works on hw |
 | 03 | [lvgl-demos](projects/03-lvgl-demos/) | Touch launcher for LVGL's official demos (Widgets, Music, Benchmark, Stress). Source of the benchmark numbers in the hardware log. | works on hw |
 | 04 | [lvgl-fb2-bench](projects/04-lvgl-fb2-bench/) | Experiment: double framebuffers with a vsync swap. It works but measured slower (20 vs 35 FPS), so it is not used. | works on hw |
-| 05 | [**powerwall-display**](projects/05-powerwall-display/) | **Tesla Powerwall 3 dashboard** from the gateway's local API, plus weather, moon, aurora, space weather and El Nino screens, SD logging and cache. | works on hw |
+| 05 | [**powerwall-display**](projects/05-powerwall-display/) | **Tesla Powerwall 3 dashboard** from the gateway's local API, plus history charts, weather, moon, aurora, space weather and El Nino screens, SD logging and cache. | works on hw |
 | 06 | [sd-card-test](projects/06-sd-card-test/) | microSD bring-up and the shared SD code: 19 functional tests, clock sweep, soak and hot-swap, all drivable over serial. | works on hw |
 
 ## Development guide
