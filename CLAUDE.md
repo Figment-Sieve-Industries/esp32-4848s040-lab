@@ -20,7 +20,7 @@ Updating the guide is part of finishing a task, not optional:
 - Keep cross-links valid (anchors `inv-<slug>`, Q-/D-IDs) and the index tables at the top of each chapter in step.
 - Hardware results also go in `docs/hardware-log.md`; new projects in `projects/README.md` and the README projects table.
 
-Testing on hardware (project 05 pattern, reuse it in new projects): serial commands (`s n p l b m x v c r h`, see the top of `projects/05-powerwall-display/src/main.cpp`), screenshots with `projects/05-powerwall-display/tools-dev/screendump.py COM9 out --all --privacy` (look at every screen after UI changes), timestamped soak logs, `addr2line` for backtraces, host tests in `projects/05-powerwall-display/hosttest/run.ps1`. Details and pitfalls (CH340 reset on port open, concurrent pio runs): guide chapter 02.
+Testing on hardware (project 05 pattern, reuse it in new projects): serial commands (`s n p l b bf bd br bs m x v c r h`, see the top of `projects/05-powerwall-display/src/main.cpp`), screenshots with `projects/05-powerwall-display/tools-dev/screendump.py COM9 out --all --privacy` (look at every screen after UI changes), timestamped soak logs, `addr2line` for backtraces, host tests in `projects/05-powerwall-display/hosttest/run.ps1`. Details and pitfalls (CH340 reset on port open, concurrent pio runs): guide chapter 02.
 
 Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits only as `Paul <paul@wibjibit.com>`. Never commit secrets, flash backups, serial/soak logs (they contain the home SSID), local paths, private claude.ai links, the home town or coordinates; screenshots only in privacy mode (`v 1`). CI builds every project and runs the host tests on each push.
 
@@ -54,7 +54,7 @@ Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits on
 
 ## Library API (`#include <Board4848S040.h>`, namespace `board4848`)
 - `Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX)`: ST7701 init over 3-wire SPI, 12 MHz RGB, framebuffer in PSRAM, bounce buffers on (they stop the flicker; verified on hardware)
-- `void setBacklight(uint8_t level)`: LEDC at 100 kHz, 8-bit. The driver cuts out below ~100 (`B4848_LCD_BL_MIN`).
+- `void setBacklight(uint8_t level)`: LEDC, 100 kHz by default (`B4848_LCD_BL_FREQ_HZ`), highest duty resolution for that frequency (9 bits at 100 kHz). The driver cuts out below ~100/255 (`B4848_LCD_BL_MIN`). Also `setBacklightLevel(float)`, `setBacklightDuty(raw)`, `bool setBacklightFrequency(hz)` and getters `backlightFrequency/Resolution/Duty/DutyMax/MinDuty()`; the frequency default changes only after the hardware sweep (docs/02-pinout.md).
 - `Touch`:
   - `begin()` probes GT911 at 0x5D/0x14 and checks the product ID "911"
   - `read(points, max)` returns `-1` for no new data, `0` for released, or `n` points

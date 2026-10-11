@@ -19,7 +19,7 @@ The same pins are defined in code in [`common/lib/Board4848S040/src/Board4848S04
 | R0–R4 | 11, 12, 13, 14, 0 (panel DB13–17) |
 | G0–G5 | 8, 20, 3, 46, 9, 10 (panel DB6–11) |
 | B0–B4 | 4, 5, 6, 7, 15 (panel DB1–5) |
-| Backlight | 38, active high → U5 EN via R13 (R14 pull-down). PWM at 100 kHz. |
+| Backlight | 38, active high → U5 EN via R13 (R14 pull-down). PWM at 100 kHz by default (configurable, see "Backlight dimming range"). |
 | LCD reset | Not connected to the ESP32. Shared RC power-on reset (R16 10k / C22 1 µF) with the GT911. |
 
 Backlight minimum: the driver cuts out below roughly **100/255** at 100 kHz PWM *(community: joevial's `BL_EN_MIN 102`)*. On unit 1, **100 is confirmed still lit** and there is no whine at 100 kHz; the exact cut-out isn't measured yet ([hardware log](hardware-log.md)). An earlier figure of ~60 was measured at a lower PWM frequency.
@@ -94,15 +94,31 @@ Wire1.begin(1, 40, 400000);   // I2C_NUM_1; Wire is the GT911 bus
 
 This needs the relay/audio links removed, or no relay board. 3.3 V for sensors is available on test pad **S3** (S4 = GND). Alternatively, put extra I2C devices on the touch bus, as long as nothing clashes with 0x5D/0x14 and the GPIO45 warning above is respected.
 
-## Backlight dimming range *(planned, not yet done)*
-On unit 1 the 05 brightness slider (duty 100-255 at 100 kHz) makes very little visible difference (user report, 2026-10-11). Likely causes:
+## Backlight dimming range *(A and B implemented; the hardware sweep is still to do)*
+On unit 1 the 05 brightness slider (duty 100-255 at 100 kHz) made very little visible difference (user report, 2026-10-11). Likely causes:
 1. **Narrow range.** 100-255 is only 2.5x in duty, and perceived brightness is roughly logarithmic.
 2. **PWM too fast for the driver.** U5 is dimmed by gating its EN pin. A boost driver needs some start-up time on each EN pulse, and at 100 kHz each period is only 10 µs, so low and mid duties are compressed. This also explains why the cut-out is ~100 at 100 kHz but ~60 at a lower frequency.
 
-Planned fix, in this order:
-- **A. Lower the PWM frequency to ~20-25 kHz** (still above hearing). Measure first with a serial-driven sweep in `06-sd-card-test` (or a small bench project): step frequency (100, 50, 25, 20 kHz) and duty (0-255) while someone watches the panel and listens for whine. Pick the lowest silent frequency with an even response, then measure the true minimum duty and update `setBacklight()` and `B4848_LCD_BL_MIN` in the board library (all projects benefit) and the hardware log.
-- **B. Perceptual curve on the slider.** Map slider position to duty with a gamma-style curve (e.g. duty = min + (255 - min) * p^2.2), so equal slider steps look like equal brightness steps. Cheap; do it together with A. On its own it doesn't widen the range.
-- Only if A falls short: the hardware mod below.
+What is in the code now (nothing is flashed or measured yet; the default PWM frequency is still 100 kHz):
+- **A. Configurable PWM** (board library). `B4848_LCD_BL_FREQ_HZ` (default 100000) is the start-up frequency; a project can override it with `-DB4848_LCD_BL_FREQ_HZ=<hz>`. `board4848::setBacklightFrequency(hz)` retunes at run time, picks the highest duty resolution that frequency allows (f x 2^bits <= 80 MHz, capped at 12 bits: **9 bits at 100 kHz, 11 bits at 20-25 kHz**) and rescales the current duty, so the brightness stays. `setBacklight(0..255)` keeps working (mapped onto the current resolution), plus `setBacklightLevel(0.0..1.0)`, `setBacklightDuty(raw)` and the getters `backlightFrequency/Resolution/Duty/DutyMax/MinDuty()`. `backlightMinDuty()` is `B4848_LCD_BL_MIN` (100/255) scaled to the current resolution and rounded up (201 at 9 bits, 803 at 11 bits). The same fraction is assumed at every frequency: that is safe if the real limit is a fraction of the period, and conservative if it is a minimum on-time. Re-measure it per frequency (below) and override `B4848_LCD_BL_MIN` once known.
+- **B. Gamma slider** (project 05, `src/backlight_curve.h`). The slider is 0-100 % and the saved value is that percentage (not the duty). `duty = minDuty + round((maxDuty - minDuty) * (pct/100)^2.2)`. **0 % is the dimmest level that is still lit** (`minDuty`), never off; `b 0` over serial still switches the backlight off. With 9 bits (about 310 usable steps) the lowest ~5 slider positions round to the same duty; at 11 bits that flat zone shrinks to ~2. Old `settings.bin` files (raw duty, magic `SET1`) are converted on load to the percentage that gives the same duty; the file size is unchanged.
+
+### Hardware sweep (the user does this; nothing here is measured yet)
+Needs project 05 flashed and a serial monitor on its port (115200 baud, close the monitor before `pio upload`). All settings below are temporary (lost at reboot); the saved slider is not touched. Commands are in the project 05 README.
+
+For each frequency in the order **100000, 50000, 25000, 20000, 5000**:
+1. `bf <hz>`. The reply shows the resolution and the duty maximum (`br` reports it again). 5000 Hz is expected to be audible: it is there to see whether the dimming range gets better and how bad the whine is.
+2. **Listen** with the panel at about 20 cm (quiet room, ear close to the top edge and the back where U5 and its inductor sit): `b 255`, then `bd <about 25 % of max>`, then `bd <about 50 %>`. Note whine, hiss or buzz at each. Note flicker too: look at the panel with the phone camera in slow motion or just by eye in the corner of your vision.
+3. **Find the cut-out**: `bs 32 700` steps the duty from 0 to the maximum in 32 steps, 0.7 s apart, and prints `bs i/n duty D @ F Hz` for each step. Watch the panel (a dark room helps) and note the step number where it first lights, and the step where it is clearly at full brightness. Stop early with `bs 0`.
+4. **Refine**: go to the duty just below the first lit step and walk up with `bd <duty>` (or run `bs 20 1000 <from> <to>` over that narrow window) until you find the lowest duty at which the panel is still lit. Record it, together with the maximum, as both a raw number and a fraction of the maximum.
+5. **Judge the response**: with `bs 16 1000` look at how even the steps are. Many steps that look the same at the top, or a jump at the bottom, mean the range is compressed at that frequency.
+
+Record per frequency: resolution, duty maximum, lowest duty still lit (raw and as a fraction), audible whine yes/no (how bad), visible flicker yes/no, evenness of the steps. Put the table in [hardware-log.md](hardware-log.md). Then:
+- Pick the **lowest frequency with no audible whine and no visible flicker** and the most even response (probably 20-25 kHz).
+- Set `-DB4848_LCD_BL_FREQ_HZ=<hz>` (or change the default in `Board4848S040_pins.h`, so all projects benefit) and `-DB4848_LCD_BL_MIN=<value as /255, rounded up>` from the measured fraction; keep a small safety margin.
+- Update [Q-GFX-05](guide/01-quirks-and-gotchas.md#q-gfx-05) and [inv-brightness-range](guide/03-investigations.md#inv-brightness-range) with the numbers.
+
+Only if the lowest usable brightness is still too bright: the hardware mod below.
 
 ## Backlight hardware mod *(community: joevial; untested)*
 For deeper dimming, joevial changes R12 from 5.1 Ω to 33 Ω, adds about 80 nF from FB to GND, and wires FB to GPIO2 for a second, coarse brightness channel (GPIO38 stays the fine one). See `reference/ESP32-4848S040-LVGL-LGFX/README.md`. This conflicts with relay 2 / audio LRCLK on GPIO2.

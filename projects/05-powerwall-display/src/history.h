@@ -7,6 +7,7 @@
 // Nothing is written to the ESP32's internal flash.
 #include <Arduino.h>
 #include <time.h>
+#include "backlight_curve.h"
 
 // Start the SD task. Call once in setup(), AFTER board4848::initDisplay() (SD shares the LCD's
 // init-bus pins). The card is mounted asynchronously; no card is fine (polled every 2 s).
@@ -39,8 +40,11 @@ bool historyLoadBaseline(void *data, size_t len);
 
 // ---- Settings (saved on the card; defaults until a card is read) ----
 struct AppSettings {
-    uint8_t brightness = 255; // backlight duty, B4848_LCD_BL_MIN..255
+    uint8_t brightnessPct = blcurve::PCT_DEFAULT; // brightness slider position 0..100 (see backlight_curve.h)
 };
 AppSettings settingsGet();
-// Applies the backlight immediately and queues a save to the card.
-void settingsSetBrightness(uint8_t level);
+// Sets the slider position (0..100, clamped), applies the backlight through the gamma curve immediately
+// and queues a save to the card.
+void settingsSetBrightness(int pct);
+// Applies the current setting to the backlight (call after the PWM frequency or resolution changed, and at boot).
+void settingsApplyBacklight();

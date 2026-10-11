@@ -23,10 +23,11 @@ constexpr uint32_t INFO_MS = 10000;        // used/total space refresh
 constexpr uint32_t SETTINGS_SETTLE_MS = 1500; // save brightness once the slider has stopped moving
 constexpr size_t BASELINE_MAX = 512;
 
-constexpr uint32_t SETTINGS_MAGIC = 0x53455431; // "SET1"
+// settings.bin: { magic, value }. "SET2" = slider percent; "SET1" (older firmware) = raw 8-bit duty of the old
+// linear slider, converted on load (backlight_curve.h). The size is unchanged, so old files still read.
 struct SettingsFile {
     uint32_t magic;
-    AppSettings s;
+    uint8_t value;
 };
 
 Mutex s_lock; // static init: the getters work (defaults) before historyStart()
@@ -52,20 +53,27 @@ struct MinuteAcc {
     bool gridDown = false;       // any off-grid reading in the minute
 } s_acc;
 
+void applyBacklight(int pct) {
+    board4848::setBacklightDuty(
+        blcurve::dutyForPercent(pct, board4848::backlightMinDuty(), board4848::backlightDutyMax()));
+}
+
 void loadSettings() {
     SettingsFile f;
-    bool ok = sdcard::readAtomic(SETTINGS_PATH, &f, sizeof(f)) && f.magic == SETTINGS_MAGIC;
-    uint8_t level;
+    memset(&f, 0, sizeof(f));
+    int pct = 0;
+    // Wrong size, unknown magic or an out-of-range value all fall back to the defaults.
+    bool ok = sdcard::readAtomic(SETTINGS_PATH, &f, sizeof(f)) &&
+              blcurve::percentFromSaved(f.magic, f.value, B4848_LCD_BL_MIN, pct);
     {
         LockGuard g(s_lock);
         s_settingsLoaded = true;
         if (!ok || s_settingsDirty) return; // keep defaults, or a change made before the card was read
-        if (f.s.brightness < B4848_LCD_BL_MIN) f.s.brightness = B4848_LCD_BL_MIN;
-        s_settings = f.s;
-        level = s_settings.brightness;
+        s_settings.brightnessPct = static_cast<uint8_t>(pct);
     }
-    board4848::setBacklight(level);
-    Serial.printf("SD: settings loaded (brightness %u)\n", level);
+    applyBacklight(pct);
+    Serial.printf("SD: settings loaded (%s, brightness %d%%)\n",
+                  f.magic == blcurve::SETTINGS_MAGIC_V2 ? "v2" : "v1 converted", pct);
 }
 
 void saveSettingsIfDue() {
@@ -74,8 +82,9 @@ void saveSettingsIfDue() {
         LockGuard g(s_lock);
         if (!s_settingsDirty || millis() - s_settingsChangedMs < SETTINGS_SETTLE_MS) return;
         s_settingsDirty = false;
-        f.magic = SETTINGS_MAGIC;
-        f.s = s_settings;
+        memset(&f, 0, sizeof(f)); // no stray padding bytes on the card
+        f.magic = blcurve::SETTINGS_MAGIC_V2;
+        f.value = s_settings.brightnessPct;
     }
     if (!sdcard::mkdirs(DIR) || !sdcard::writeAtomic(SETTINGS_PATH, &f, sizeof(f))) {
         LockGuard g(s_lock);
@@ -252,11 +261,20 @@ AppSettings settingsGet() {
     return s_settings;
 }
 
-void settingsSetBrightness(uint8_t level) {
-    if (level < B4848_LCD_BL_MIN) level = B4848_LCD_BL_MIN;
-    board4848::setBacklight(level);
+void settingsApplyBacklight() {
+    int pct;
+    {
+        LockGuard g(s_lock);
+        pct = s_settings.brightnessPct;
+    }
+    applyBacklight(pct);
+}
+
+void settingsSetBrightness(int pct) {
+    pct = blcurve::clampPct(pct);
+    applyBacklight(pct);
     LockGuard g(s_lock);
-    s_settings.brightness = level;
+    s_settings.brightnessPct = static_cast<uint8_t>(pct);
     s_settingsDirty = true;
     s_settingsChangedMs = millis();
 }

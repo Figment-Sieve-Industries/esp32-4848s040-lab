@@ -108,7 +108,7 @@ Swipe left and right. The page dots at the bottom show where you are.
 | 6 | **Aurora (UK)** | The AuroraWatch UK alert level, the last 24 hours of activity, and a three-day Kp strip (seen and forecast). |
 | 7 | **Sun and space weather** | A live photo of the Sun from SOHO, X-ray flare class and odds, NOAA R/S/G scales, solar wind, sunspot number and F10.7 flux. |
 | 8 | **El Nino (ENSO)** | The NOAA CPC status, weekly Nino 3.4 and its anomaly, ONI and RONI, 12 months of history and the outlook odds. |
-| 9 | **Settings** | Backlight brightness slider (saved on the SD card) and SD card status: card type and clock, space used, today's log file, lines written, last write, and whether today's totals are backed up. |
+| 9 | **Settings** | Backlight brightness slider, 0 to 100 % on a gamma curve (0 % is the dimmest level that is still lit; the position is saved on the SD card) and SD card status: card type and clock, space used, today's log file, lines written, last write, and whether today's totals are backed up. |
 | 10 | **About** | The firmware name and the data credits for every source the device uses. |
 
 If gateway data is more than 20 seconds old the values show `--`, and a short error message appears below the page dots. Weather older than an hour is shown as stale.
@@ -177,7 +177,11 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 | `s <n>` | Go to screen `n` (0 to 9) the way a swipe does |
 | `n` / `p` | Next / previous screen (wraps) |
 | `l` | List the screens, the current one marked `*` |
-| `b <0-255>` | Set the backlight now (not saved; the panel driver cuts out below about 100) |
+| `b <0-255>` | Set the backlight now over the current duty range (not saved; the panel driver cuts out below about 100/255) |
+| `bf <hz>` | Backlight PWM frequency, 100 to 1000000 Hz (not saved). Keeps the brightness and uses the highest duty resolution that frequency allows (9 bits at 100 kHz, 11 bits at 20 to 25 kHz). Replies with the same line as `br` |
+| `bd <duty>` | Raw backlight duty at the current resolution, 0 to the maximum shown by `br` (not saved) |
+| `br` | Report the backlight: `backlight 100000 Hz, 9 bits, duty 511 of 511, assumed minimum 201 #ok` |
+| `bs [steps [ms [from [to]]]]` | Watch-the-panel sweep: steps the raw duty from `from` to `to` (default 0 to the maximum) in `steps` steps (default 16, 2 to 256), `ms` apart (default 1000, 100 to 10000), printing `bs i/n duty D @ F Hz` per step. Runs in the background; `bs 0` or any `b`, `bd` or `bf` stops it. The brightness setting comes back at the end (`bs done ... #ok`) |
 | `m` | Print the memory and heap line |
 | `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |
 | `v <0\|1>` | Privacy mode for screenshots: placeholder Wi-Fi name and town (not saved) |
