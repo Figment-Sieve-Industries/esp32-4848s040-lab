@@ -10,7 +10,7 @@ This is the single list of projects; the root README links here. Each project is
 | 02 | [02-lvgl-hello](02-lvgl-hello/) | works on hw | LVGL 9.5 base: button, backlight slider, FPS monitor. **Copy this for UI projects.** |
 | 03 | [03-lvgl-demos](03-lvgl-demos/) | works on hw | Touch launcher for LVGL's official demos: Widgets, Music (square), Benchmark, Stress. Benchmark results are in the [hardware log](../docs/hardware-log.md). |
 | 04 | [04-lvgl-fb2-bench](04-lvgl-fb2-bench/) | works on hw | Experiment: double framebuffers + vsync swap. Works, but measured slower (20 vs 35 FPS). See the hardware log. |
-| 05 | [05-powerwall-display](05-powerwall-display/) | works on hw | Live Tesla Powerwall 3 dashboard from the gateway's local LAN API. Four swipeable screens: power flow (design M: pills, chevron flows, weather card with rain %, grid status, VPP), today's energy, battery & grid health, weather + 12 h forecast. Multi-Wi-Fi, NTP, Open-Meteo, rotation. No flash writes at runtime. Needs `src/secrets.h`. |
+| 05 | [05-powerwall-display](05-powerwall-display/) | works on hw | **Tesla Powerwall 3 display** from the gateway's local LAN API (keep-alive HTTPS). Ten swipeable screens: power flow, today, battery & grid, weather, moon, aurora (UK), sun & space weather, El Nino, settings (brightness, SD status), about. SD minute log, power-cut-safe today totals, SD cache of fetched data (screens fill ~2 s after boot). Serial test commands and screenshots. No internal-flash writes at runtime. Needs `src/secrets.h`. |
 | 06 | [06-sd-card-test](06-sd-card-test/) | works on hw | microSD bring-up and the shared SD code (`common/lib/SdStore`, patched `common/lib/SD`): mount, card registers, 19 functional tests, clock sweep, soak, hot-swap. Fully drivable over serial (`sd_serial.py`). |
 
 Status values: `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" means it compiles; it has **not** been run on a board yet.
@@ -24,7 +24,7 @@ Numbers are assigned when a project starts.
 | wifi-ota | Wi-Fi provisioning + ArduinoOTA + mDNS; second env with `upload_protocol = espota` |
 | esphome-minimal | Minimal ESPHome YAML (display, touch, backlight, OTA) for Home Assistant |
 | LVGL performance, round 2 | Done so far: `-O2`, IRAM, 120-line buffer (35 FPS); double FB and 2 draw threads were slower. Next: async DMA flush (`esp_async_memcpy`) with 2 draw buffers to hide the 20 ms copy, then esp_lvgl_port SIMD blend. |
-| 05 follow-ups | OTA updates (it will be wall-mounted); SD-card history logging for real day/week/month charts and today totals that survive power cuts (no internal-flash writes - user requirement); a VPP test toggle; optional TEDAPI access for backup reserve / operation mode. |
+| 05 follow-ups | OTA updates (it will be wall-mounted); day/week/month charts from the SD log; a VPP test toggle; optional TEDAPI access for backup reserve / operation mode; fewer simultaneous label redraws on the power-flow screen (the remaining ~150 ms frames). |
 | Backlight range | The 05 brightness slider barely changes the backlight. Plan: (A) lower the PWM from 100 kHz to ~20-25 kHz after a serial-driven sweep with someone watching/listening, then re-measure the minimum; (B) gamma curve on the slider. Details: [docs/02-pinout.md](../docs/02-pinout.md#backlight-dimming-range-planned-not-yet-done). |
 | LovyanGFX alternative | Port the shared lib to LovyanGFX (`Panel_ST7701_guition_esp32_4848S040`, see `reference/ESP32-4848S040-LVGL-LGFX`) and compare speed |
 

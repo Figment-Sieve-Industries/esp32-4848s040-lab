@@ -1,6 +1,6 @@
 # mini-screen: agent guide
 
-Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 4" 480×480 ST7701S RGB panel, GT911 touch, CH340C USB-UART, microSD, NS4168 amp, Li-ion charger, optional relays. Licences of reference code are not a concern.
+Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 4" 480×480 ST7701S RGB panel, GT911 touch, CH340C USB-UART, microSD, NS4168 amp, Li-ion charger, optional relays. The repo is public (MIT, see LICENSE): code copied from reference/ or elsewhere keeps its own licence and must be credited in docs/guide/99-sources-and-credits.md. Never commit secrets, personal data or flash backups.
 
 ## Layout
 - `README.md`: master index
@@ -48,7 +48,7 @@ Personal hobby workspace for the **Guition ESP32-4848S040C_I**: ESP32-S3 N16R8, 
 - Arduino_GFX is pinned in `library.json`. LVGL is pinned to 9.5.0 per project.
 
 ## Project 05 (Powerwall display) - current state
-- Main screen = design **N** with design **O**'s battery-bar Powerwall pill (colour by charge, % badge inside the battery) from the design canvas https://<private design canvas>. Boards A-O there are the option history (P = moon, Q = aurora). Change the canvas first for layout work, then build the chosen board.
+- Main screen = design **N** with design **O**'s battery-bar Powerwall pill (colour by charge, % badge inside the battery) from the maintainer's private design canvas (a claude.ai artifact; link not published). Boards A-O there are the option history (P = moon, Q = aurora). Change the canvas first for layout work, then build the chosen board.
 - 10 screens (`ScreenIndex` in `ui_common.h`): house, today, health, weather, moon, aurora, sun, El Nino, settings, about. All credits live on the About screen only (personal device).
 - Architecture: `powerwall.cpp` runs the single network task on core 0: each pass polls the Powerwall LAN API (Bearer token) then runs at most one due job (Open-Meteo 15 min, sky/space 30 min, sun image 1 h, ENSO 12 h), so only one TLS session ever exists. LVGL runs on core 1 only. Screens are `screen_*.cpp` behind `screens.h`, sharing `ui_common.*` (palette, top bar, page dots, animations). `energy.cpp` keeps today's totals in RTC memory, backed up to SD via `history.cpp` (SD task on core 0: minute CSV log, baseline, settings). `sky.cpp` fetches AuroraWatch UK + NOAA Kp every 30 min and MET Norway moon times once a day; `moon_calc.cpp` does the phase maths. `space.cpp` (NOAA SWPC + SOHO sun JPEG via LVGL's TJpgDec) and `enso.cpp` (NOAA CPC, HTTP Range tails) feed the sun and El Nino screens.
 - **The user does not want internal-flash writes at runtime** (wear). Use RTC memory now; an SD card later.

@@ -1,87 +1,238 @@
-# 05 — powerwall-display
+# 05 Tesla Powerwall 3 display
 
-**Goal:** a live Tesla Powerwall 3 power-flow display, read straight from the gateway on the home LAN. No cloud, no server.
+A live **Tesla Powerwall 3** energy monitor on the Guition ESP32-4848S040's 4" 480x480 touch screen, read straight from the **Powerwall gateway's local LAN API**. No Tesla cloud account, no server, no subscription. It shows solar, home battery, grid and house load in real time, plus today's totals, battery and grid health, weather, and a few sky and climate screens. Built with LVGL 9 on the ESP32-S3.
 
-**Layout:** design M "values in pills" (see the design canvas): house centre, Solar pill top-left, Grid pill bottom-left, Powerwall pill bottom-right (with an SOC bar), and a weather + grid-status + VPP card top-right. Chevron flows run in the direction of power flow. Tag chips show voltage, VA / var, flow direction and charge state. Icons are drawn with LVGL lines and arcs (`icons.cpp`). Weather comes from Open-Meteo every 15 min (`WEATHER_LAT`/`WEATHER_LON` in `secrets.h`).
+**Status:** `works on hw`. It has run on a real board against a real Powerwall 3 (gateway firmware 26.26.4). Other firmware versions and other Powerwall models have not been tried: see [limitations](#limitations-and-notes).
 
-**What it shows**
-- **Nodes:** Solar, Grid, Home and Powerwall, with live watts.
-- **Flow dots:** they run along each link in the direction power is flowing; faster for more power.
-- **Powerwall:** an SOC ring and %, plus "Charging" / "Discharging" / "Idle".
-- **Grid:** "Importing" / "Exporting", and a red **OFF-GRID** banner during an outage.
-- **Top bar:** clock (NTP), date, and the Wi-Fi network with its signal.
-- **Faults:** errors or stale data (>10 s old) show at the bottom centre, below the page dots, and values change to `--`.
-- **Tap anywhere** to cycle the backlight brightness (255 → 160 → 100).
-- **`SCREEN_ROTATION`** in `main.cpp`: the default `3` is 90° counter-clockwise, so the USB-C port is at the bottom. Touch follows the rotation.
+<table>
+  <tr>
+    <td align="center"><img src="../../docs/images/screens/05-0-house.png" width="240" alt="Power flow screen"><br>1 Power flow</td>
+    <td align="center"><img src="../../docs/images/screens/05-1-today.png" width="240" alt="Today screen"><br>2 Today</td>
+    <td align="center"><img src="../../docs/images/screens/05-2-health.png" width="240" alt="Battery and grid screen"><br>3 Battery and grid</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="../../docs/images/screens/05-3-weather.png" width="240" alt="Weather screen"><br>4 Weather</td>
+    <td align="center"><img src="../../docs/images/screens/05-4-moon.png" width="240" alt="Moon screen"><br>5 Moon</td>
+    <td align="center"><img src="../../docs/images/screens/05-5-aurora.png" width="240" alt="Aurora screen"><br>6 Aurora (UK)</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="../../docs/images/screens/05-6-sun.png" width="240" alt="Sun and space weather screen"><br>7 Sun and space weather</td>
+    <td align="center"><img src="../../docs/images/screens/05-7-enso.png" width="240" alt="El Nino screen"><br>8 El Nino</td>
+    <td align="center"><img src="../../docs/images/screens/05-8-settings.png" width="240" alt="Settings screen"><br>9 Settings</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="../../docs/images/screens/05-9-about.png" width="240" alt="About screen"><br>10 About</td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
 
-**How it gets the data** (local API on firmware 26.26.4, customer password, read-only):
-| Call | Returns |
+Screenshots are framebuffer captures from the board in privacy mode (placeholder Wi-Fi name and town).
+
+## Contents
+
+[What you need](#what-you-need) | [Set-up](#set-up) | [The screens](#the-screens) | [Data sources](#data-sources-and-refresh-intervals) | [SD card](#sd-card) | [Serial commands](#serial-commands) | [Screenshots](#screenshots) | [Troubleshooting](#troubleshooting) | [Limitations and notes](#limitations-and-notes) | [How it works](#how-it-works) | [Credits](#credits)
+
+## What you need
+
+- A **Tesla Powerwall 3** whose gateway is on your home network, and the **customer password** (see below).
+- A **Guition ESP32-4848S040** (capacitive touch, the version without relays is the simple choice). Buying notes: [hardware and sourcing](../../docs/guide/06-hardware-and-sourcing.md).
+- A **2.4 GHz Wi-Fi network** that can reach the gateway. The ESP32-S3 does not do 5 GHz. If the gateway is on a separate VLAN or Wi-Fi network, the board's network must be able to route to it.
+- A USB-C data cable and a computer with PlatformIO (Windows and PowerShell are what the helper scripts assume).
+- A **microSD card** (optional): plain SDHC, 32 GB or less, FAT32. Without one the display still works; you lose the log, the power-cut-safe totals, the cache and the saved brightness. Card advice is in the sourcing page.
+
+## Set-up
+
+### 1. The gateway password
+
+The display logs in as the gateway's `customer` user, the same access as the gateway's own web page. The **customer password is the last 5 characters of the gateway password printed on the QR sticker** (on the Powerwall or gateway, and on the paperwork). You need only those 5 characters.
+
+This is a read-only login. The firmware only reads three endpoints and never changes any setting on the Powerwall.
+
+### 2. Find the gateway's IP address
+
+Look in your router's DHCP client list for the Powerwall or gateway, then **give it a DHCP reservation** so the address does not change. The examples here use the documentation address `192.0.2.50`; yours will differ. If it is not in the list, it may be on another network segment (some home networks put IoT devices on a VLAN).
+
+### 3. Configure `src/secrets.h`
+
+Copy `src/secrets.example.h` to `src/secrets.h`. The file is git-ignored; never commit it.
+
+```cpp
+// Any number of networks; the strongest in range is joined. 2.4 GHz only.
+static const WifiCred WIFI_NETWORKS[] = {
+    {"My<home-ssid>", "password1"},
+};
+
+#define PW_HOST "192.0.2.50"            // the gateway's LAN IP
+#define PW_CUSTOMER_PASSWORD "XXXXX"    // last 5 characters of the gateway password
+
+#define TZ_INFO "GMT0BST,M3.5.0/1,M10.5.0"  // POSIX TZ string for the clock (UK shown)
+
+#define WEATHER_LAT 51.5072             // Open-Meteo, no API key
+#define WEATHER_LON (-0.1276)           // keep the brackets around a negative value
+#define WEATHER_NAME "LONDON"           // shown on the weather screen
+```
+
+| Setting | Notes |
 |---|---|
-| `POST /api/login/Basic` | `{"token": …}`, then sent as `Authorization: Bearer <token>` |
-| `GET /api/meters/aggregates` | site / battery / load / solar `instant_power` (chunked response) |
-| `GET /api/system_status/soe` | `{"percentage": …}` |
-| `GET /api/system_status/grid_status` | `SystemGridConnected` or islanded |
+| `WIFI_NETWORKS` | Any number of networks (`WiFiMulti` joins the strongest and switches if it drops). If none is found, the board prints a scan of every visible network to serial. |
+| `PW_HOST`, `PW_CUSTOMER_PASSWORD` | Gateway address and the 5-character password. A wrong password shows "login rejected - check password" and retries with growing delays (30 s up to 5 min). |
+| `TZ_INFO` | A POSIX time-zone string, for example `CET-1CEST,M3.5.0,M10.5.0` for central Europe. Used for the clock, the date, the midnight rollover of today's totals and the daily log file. |
+| `WEATHER_LAT`, `WEATHER_LON`, `WEATHER_NAME` | Your location for the weather, moon rise and set, and the "visible from ..." line on the aurora screen. The coordinates are sent to Open-Meteo and MET Norway with each request, and they identify your home, which is why they live in the git-ignored file. Your Powerwall readings are never sent anywhere. |
 
-- No token gives 403; an expired or bad token gives 401. Either way it logs in again automatically.
-- Polls every 2 s on core 0 (`powerwall.cpp`); LVGL runs in `loop()` on core 1. They share data only through a mutex-protected snapshot.
-- Sign conventions: grid > 0 = importing; battery > 0 = discharging.
+The aurora and El Nino screens are UK-oriented (AuroraWatch UK) and global (NOAA) respectively. Outside the UK the aurora alert level is still the UK one.
 
-**Setup**
-1. Copy `src/secrets.example.h` to `src/secrets.h` (git-ignored) and fill in:
-   - the Wi-Fi networks: any number; `WiFiMulti` joins the strongest; **2.4 GHz only**
-   - the gateway IP
-   - the **customer password**: the last 5 characters of the gateway password on the QR sticker
-2. Give the Powerwall a DHCP reservation so its IP doesn't change.
-3. `.\tools\pio.ps1 -Project 05-powerwall-display -Action all` (PowerShell)
+### 4. Build and flash
 
-**Diagnostics:** serial prints a status line every 10 s. If no configured network is found, it prints a scan of every network it can see.
+From PowerShell at the repository root (not Git Bash). Back up the factory flash first if you have not already (`.\tools\backup-flash.ps1`).
 
-**Memory notes**
-- No `LV_ATTRIBUTE_FAST_MEM` in this project. The core's mbedTLS allocates only from internal RAM, and needs ~40–50 KB per TLS session.
-- LVGL uses its own 1 MB PSRAM pool (see Memory below).
+```powershell
+.\tools\pio.ps1 05-powerwall-display all -Port COM5
+```
 
-**Status:** `works on hw` (2026-10-10). Layout (rotation 3; Solar top-left, Grid bottom-left, Powerwall bottom-right) confirmed; flow animation ~28 fps, smooth.
+`all` builds, uploads and opens the serial monitor (115200 baud). Use `build` to compile only. The first build downloads the toolchain and takes several minutes.
 
-## Screens (swipe left / right)
+`SCREEN_ROTATION` in `src/main.cpp` defaults to `3` (90 degrees counter-clockwise, USB-C port at the bottom). Touch follows the rotation.
+
+## The screens
+
+Swipe left and right. The page dots at the bottom show where you are.
+
 | # | Screen | Shows |
 |---|---|---|
-| 1 | **Power flow (design M)** | House hub with chevron flows; Solar / Grid / Powerwall as pills (value inside, SOC bar on the Powerwall pill); tag chips for Home voltage (amber outside 207-253 V) and VA / var, Grid direction and kVA / var, Powerwall charge state. Top-right card adds a VPP row (grey ring "VPP idle", pulsing amber "VPP event active" from `grid_services_active`). Weather card: temperature, scrolling condition, high/low, today's rain chance, animated icon. Grid status. Top bar: Wi-Fi network + dBm |
-| 2 | **G · Today** | Self-powered % ring, solar / home / Powerwall in-out kWh, exported / imported tiles, solar-by-hour bars |
-| 3 | **H · Battery & grid** | SOC, charge/discharge power and time to full/empty (13.5 kWh assumed), grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, grid-services (VPP) badge |
-| 4 | **I · Weather** | Current conditions (feels-like, wind, high/low, rain %), next 10 h (now to +10 h) in 2 h steps, lifetime totals |
+| 1 | **Power flow** | A house in the centre with chevrons that run along each link in the direction power flows, faster for more power. Solar, Grid and Powerwall pills with live values; the Powerwall pill has a state-of-charge bar and "Charging", "Discharging" or "Idle". Chips for home voltage (amber outside 207-253 V), VA and var, and grid direction ("Importing" or "Exporting"). A card with the weather (temperature, condition, high and low, rain chance), the grid status (a red **OFF-GRID** banner in an outage) and a VPP row. A "Today" card with self-powered share and energy exported. Top bar: clock, date, Wi-Fi network and signal. |
+| 2 | **Today** | Self-powered percentage ring; solar, home and Powerwall energy in and out in kWh; exported and imported tiles; solar by hour. |
+| 3 | **Battery and grid** | State of charge, charge or discharge power and time to full or empty, grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, and a grid-services (VPP) badge. |
+| 4 | **Weather** | Current conditions (feels-like, wind, high and low, rain chance), the next 10 hours in 2-hour steps, and lifetime energy totals. |
+| 5 | **Moon** | A photograph of the full moon shaded on the device to the current phase, with phase name, illumination, age, moonrise and moonset, next full and new moon, and an eight-step phase strip. |
+| 6 | **Aurora (UK)** | The AuroraWatch UK alert level, the last 24 hours of activity, and a three-day Kp strip (seen and forecast). |
+| 7 | **Sun and space weather** | A live photo of the Sun from SOHO, X-ray flare class and odds, NOAA R/S/G scales, solar wind, sunspot number and F10.7 flux. |
+| 8 | **El Nino (ENSO)** | The NOAA CPC status, weekly Nino 3.4 and its anomaly, ONI and RONI, 12 months of history and the outlook odds. |
+| 9 | **Settings** | Backlight brightness slider (saved on the SD card) and SD card status: card type and clock, space used, today's log file, lines written, last write, and whether today's totals are backed up. |
+| 10 | **About** | The firmware name and the data credits for every source the device uses. |
 
-Code: `screen_house.cpp`, `screen_today.cpp`, `screen_health.cpp`, `screen_weather.cpp`. Shared look and helpers: `ui_common.*`. Icons: `icons.*`.
+If gateway data is more than 20 seconds old the values show `--`, and a short error message appears below the page dots. Weather older than an hour is shown as stale.
+
+The code is in `src/screen_*.cpp` behind `screens.h`, with the shared palette, top bar and animations in `ui_common.*` and the drawn icons in `icons.*`.
+
+## Data sources and refresh intervals
+
+| Data | Source | Refresh |
+|---|---|---|
+| Power, battery, grid, voltage | Powerwall gateway, local LAN API | Every 2 s, over one kept-alive HTTPS connection |
+| Weather and 10-hour forecast | [Open-Meteo](https://open-meteo.com/) | 15 min |
+| Aurora alert and 24 h activity | [AuroraWatch UK](https://aurorawatch.lancs.ac.uk/) | 30 min |
+| Kp index and forecast | NOAA SWPC | 30 min |
+| Flares, solar wind, scales, sunspots | NOAA SWPC | 30 min |
+| Moonrise and moonset | MET Norway | Once per local day (checked every 30 min) |
+| Moon phase | Computed on the device (Meeus) | Continuous |
+| Sun photo | SOHO (ESA and NASA) | 1 h |
+| El Nino (ENSO) | NOAA CPC | 12 h |
+
+All of this runs on one network task, one HTTPS session at a time. Failed background fetches retry sooner than their normal period. Each fetch pins the root certificate of its host, sends an identifying User-Agent and has a 12-second time budget so that it cannot make the live power data stale. Terms and licences of each source: [sources and credits](../../docs/guide/99-sources-and-credits.md).
+
+**What the gateway is asked for** (firmware 26.26.4, customer login, read-only):
+
+| Call | Returns |
+|---|---|
+| `POST /api/login/Basic` | A token, sent back as `Authorization: Bearer <token>` |
+| `GET /api/meters/aggregates` | Site, battery, load and solar `instant_power`, voltage, frequency, reactive and apparent power, lifetime counters (chunked response) |
+| `GET /api/system_status/soe` | State of charge percentage |
+| `GET /api/system_status/grid_status` | `SystemGridConnected` or islanded, and the grid-services flag |
+
+No token gives 403 and an expired token gives 401; either way the display logs in again by itself. Sign conventions: grid above 0 is importing, battery above 0 is discharging.
+
+## SD card
+
+Optional, and recommended. The card is mounted after the display starts, checked every couple of seconds, and can be removed and inserted while running. The firmware never formats a card. Nothing is written to the board's internal flash while it runs, so the SD card is the only place history can live.
+
+| What | Where | Notes |
+|---|---|---|
+| Minute log | `/powerwall/YYYY-MM-DD.csv` | One file per local day, one row per minute averaged from the 2-second readings |
+| Today's totals backup | On the card, written atomically | Today's totals survive a power cut and a reboot; the baseline is restored at start-up |
+| Data cache | `/powerwall/cache/<name>.bin` | Weather, aurora, Kp, moon times, space weather, sun image, El Nino. After a reboot the screens fill at once and a fetch still inside its refresh window is skipped. Each record has a CRC; a bad or old-format record is ignored and refetched |
+| Settings | On the card | Brightness |
+
+CSV columns (header row `time,solar_w,home_w,grid_w,battery_w,soc_pct,voltage_v,grid_up`):
+
+| Column | Meaning |
+|---|---|
+| `time` | Local time of the minute, `YYYY-MM-DD HH:MM` |
+| `solar_w` | Solar power, W |
+| `home_w` | House load, W |
+| `grid_w` | Grid power, W; positive is importing |
+| `battery_w` | Battery power, W; positive is discharging |
+| `soc_pct` | State of charge, percent |
+| `voltage_v` | Site voltage, V |
+| `grid_up` | `1` grid connected, `0` off-grid |
+
+Without a card, "today" totals come from the gateway's lifetime counters minus a snapshot taken at midnight, kept in RTC memory. That survives a software restart or crash but not a power cut, the reset button or a reflash; after one the screen says "TODAY SINCE HH:MM" until the next midnight.
 
 ## Serial commands
-Type a line in the serial monitor (115200 baud, the CH340C console) to drive the UI without touching it. Each command gets one reply line ending in `#ok` or `#err <reason>`. Commands are read without blocking, so the display keeps running.
+
+Type a line into the serial monitor (115200 baud) to drive the display without touching it. Each command gets one reply line ending in `#ok` or `#err <reason>`. Commands are read without blocking, so the display keeps running.
 
 | Command | Does |
 |---|---|
-| `s <n>` | Go to screen `n` (0..9) the way a swipe does: data refresh, slide, entry animations. Asking for the screen already shown just replies `#ok` |
+| `s <n>` | Go to screen `n` (0 to 9) the way a swipe does |
 | `n` / `p` | Next / previous screen (wraps) |
 | `l` | List the screens, the current one marked `*` |
-| `b <0-255>` | Set the backlight now. Not saved, and the panel driver cuts out below about 100 |
-| `m` | Print the memory / heap line (internal free, largest block, stacks, LVGL pool, PSRAM) |
+| `b <0-255>` | Set the backlight now (not saved; the panel driver cuts out below about 100) |
+| `m` | Print the memory and heap line |
+| `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |
+| `v <0\|1>` | Privacy mode for screenshots: placeholder Wi-Fi name and town (not saved) |
+| `c` | List the SD cache records (name, size, version, age) |
+| `r` | Reboot (RTC data and the clock survive) |
 | `h` | Help |
 
-Entry animations (fades, bar grow) start after the 300 ms slide, not on top of it. Build with `-DUI_FADE_AFTER_SLIDE=0` to start them immediately as before.
+A heartbeat line is printed every 10 seconds with frame rate, memory, stack headroom, network counters and SD state. Use `PW_GW_KEEPALIVE` (see `powerwall.h`) to switch the gateway connection back to one handshake per poll if your gateway misbehaves with keep-alive; the default is on.
 
-The 10 s heartbeat also prints `redraw: <n> px/s, <n> flushes/s` (invalidated pixels and display flushes per second), the number to compare when changing idle animations.
+## Screenshots
 
-## No flash wear
-- Nothing is written to flash at runtime.
-- **"Today" totals** come from the Powerwall's lifetime counters minus a midnight snapshot. The snapshot is kept in **RTC memory** (`RTC_NOINIT_ATTR`, `energy.cpp`). It survives software restarts and crashes, but not a power cut, the reset button or a reflash; the `EN` reset reports as power-on.
-- **After such a reset**, the screen shows "TODAY SINCE HH:MM" until the next midnight.
-- A future SD card could keep a full history.
+`tools-dev/screendump.py` takes a framebuffer screenshot over serial and writes a PNG without third-party imaging libraries. It needs pyserial, which PlatformIO's Python has. Close the serial monitor first: the port cannot be shared.
 
-## Memory
-- LVGL uses its own 1 MB pool in **PSRAM** (`LV_MEM_POOL_ALLOC` in `lv_conf.h`). With the C heap, every small widget lands in internal RAM, and the four screens left only ~38 KB for TLS.
-- Now: ~188 KB internal free at boot and ~140 KB while polling.
+```powershell
+$py = "$env:USERPROFILE\.platformio\penv\Scripts\python.exe"
+& $py projects\05-powerwall-display\tools-dev\screendump.py COM5 shot.png                  # current screen
+& $py projects\05-powerwall-display\tools-dev\screendump.py COM5 shot.png --screen 3       # go to screen 3 first
+& $py projects\05-powerwall-display\tools-dev\screendump.py COM5 screens --all --privacy   # every screen, placeholder Wi-Fi name and town
+```
 
-## Behaviour notes
-- **Battery %** matches the Tesla app: `(raw - 5) / 0.95`. Disable with `-DPW_SOC_APP_SCALE=0` to show the raw value.
-- **Capacity** (used for time to full/empty) can be set with `-DPW_CAPACITY_KWH=<kWh>`.
-- **Stale weather:** weather data older than 1 h is shown as stale.
-- **Login back-off:** after failed logins the gateway login is retried with increasing delays.
-- **One HTTPS connection** to the gateway is reused across polls.
-- **Weather** is fetched by its own task, using a pinned CA certificate.
+With `--all` the output argument is a prefix and the files are named `<prefix>-<n>-<name>.png`. Use `--privacy` for anything you intend to publish. A screenshot shows the framebuffer, so it cannot show tearing.
+
+## Troubleshooting
+
+| You see | Likely cause and first step |
+|---|---|
+| "login rejected - check password" | The 5-character customer password is wrong. Re-read the end of the gateway password on the sticker. Failed logins back off, so fix `secrets.h`, reflash and wait for the next attempt |
+| `--` everywhere, an error under the page dots | The gateway is unreachable or not answering. Check `PW_HOST`, the DHCP reservation, and that the board's Wi-Fi network can route to the gateway |
+| No network found, a scan listed on serial | The SSID is mistyped or only on 5 GHz. The ESP32-S3 needs 2.4 GHz |
+| Occasional gateway handshake refusals in the log | The gateway limits how often it accepts new TLS handshakes. Keep-alive (the default) cuts these sharply |
+| Blank or flickering display, build failures, upload fails, SD card problems | See the [quirks catalogue](../../docs/guide/01-quirks-and-gotchas.md) and the [debugging playbook](../../docs/guide/02-debugging-playbook.md). Power gateway entries are the Q-PW series |
+| Time wrong | Check `TZ_INFO`. The clock is set over NTP, so the board needs internet access for time (and for the weather and space data); the Powerwall data itself is local |
+
+The guide also holds the write-ups behind the design choices: [investigations](../../docs/guide/03-investigations.md) and [patterns and decisions](../../docs/guide/04-patterns-and-decisions.md).
+
+## Limitations and notes
+
+- **The gateway API is unofficial.** Tesla does not publish or support it, and it can change with any firmware update. It was tested against **Powerwall 3, firmware 26.26.4** only. Powerwall 2 and other firmware versions are untested.
+- **Only three endpoints answer** on the customer login. Backup reserve, operating mode, per-string solar, alerts and temperatures are not available; they would need a different, more privileged access that this project does not use.
+- **Battery percentage** matches the Tesla app: the gateway's raw value includes a 5 percent reserve that the app hides, so the display shows `(raw - 5) / 0.95`. Build with `-DPW_SOC_APP_SCALE=0` to show the raw value. This scaling has not been compared against the app on every state of charge.
+- **Capacity** used for time to full or empty is assumed to be 13.5 kWh per unit; override with `-DPW_CAPACITY_KWH=<kWh>`.
+- **VPP / grid services:** the "VPP event active" state has not been seen on a real event.
+- **Aurora data is UK-specific.** AuroraWatch UK and the "visible from" hint are for the UK.
+- **Non-commercial data.** Open-Meteo's free API and AuroraWatch UK's data are for non-commercial use. See the credits before building anything commercial.
+- **Not affiliated with Tesla.** Tesla and Powerwall are trademarks of Tesla, Inc.
+- **Nothing is written to internal flash at runtime**, to avoid wear. Settings and history go to the SD card.
+- **Memory:** LVGL uses its own 1 MB pool in PSRAM, and about 100 KB of internal RAM is kept free for TLS. Do not enable `LV_ATTRIBUTE_FAST_MEM` in this project; the reasons are in the [patterns chapter](../../docs/guide/04-patterns-and-decisions.md).
+- **Wi-Fi credentials and your location live only in `src/secrets.h`**, which is git-ignored. Do not paste the gateway address, password or token into issues.
+
+## How it works
+
+One network task on core 0 (`powerwall.cpp`) polls the gateway every 2 seconds and runs at most one due background fetch (weather, aurora, Kp, moon times, space weather, sun image, El Nino) per pass, one TLS session at a time. LVGL runs on core 1 only. They share data through mutex-protected snapshots. `energy.cpp` keeps today's totals in RTC memory, and `history.cpp` owns all SD card access in one low-priority task. `cache.cpp` stores the fetched data on the card.
+
+Host-side tests of the parsers, the HTTP body reader and the cache run on a PC without a board: `.\projects\05-powerwall-display\hosttest\run.ps1` (see [`hosttest/README.md`](hosttest/README.md)). The moon image data is rebuilt by [`tools-moon/`](tools-moon/README.md).
+
+## Credits
+
+Data sources, libraries and licences: [docs/guide/99-sources-and-credits.md](../../docs/guide/99-sources-and-credits.md). The About screen on the device shows the short form of the data credits. Tesla and Powerwall are trademarks of Tesla, Inc.; this project is unofficial. Made by Figment Sieve Industries, developed with Claude (Anthropic) as a coding assistant.

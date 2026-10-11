@@ -1,0 +1,34 @@
+MIT License
+
+Copyright (c) 2026 Figment Sieve Industries
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------------------------------------------------------------------------
+Third-party material in this repository keeps its own licence and copyright:
+- docs/datasheets/ and docs/vendor/: owned by their manufacturers (Espressif,
+  Goodix, Sitronix, NSIWAY, Guition); included for reference only.
+- common/boards/*.json: from rzeldent/platformio-espressif32-sunton (GPL-3.0).
+- common/lib/SD/: a patched copy of the arduino-esp32 SD library (Apache-2.0,
+  per its source headers; see common/lib/SD/README-mini-screen.md).
+- reference/: git submodules of other authors' repositories, each under its
+  own licence.
+- projects/05-powerwall-display/src/moon_photo.c: derived from a NASA
+  Scientific Visualization Studio image (public domain).
+See docs/guide/99-sources-and-credits.md for the full list and links.

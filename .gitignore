@@ -18,3 +18,9 @@ sd_serial_*.log
 
 # clang-tidy compilation database (tools/lint.ps1 moves it to %TEMP%; this is a safety net)
 compile_commands.json
+
+# Factory flash backups contain device identifiers (MAC) and vendor firmware: keep them local
+firmware/factory/*.bin
+
+# Claude Code agent worktrees
+.claude/

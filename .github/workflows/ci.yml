@@ -1,0 +1,44 @@
+# Build every PlatformIO project and run project 05's host tests on each push and pull request.
+# Projects that need credentials build with their secrets.example.h copied to secrets.h (placeholders).
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4 # reference/ submodules are not needed to build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('common/platformio-base.ini', 'projects/*/platformio.ini') }}
+      - name: Install PlatformIO Core 6.1.18
+        run: pip install "platformio==6.1.18"
+      - name: Build all projects
+        run: |
+          set -e
+          for ini in projects/*/platformio.ini; do
+            dir=$(dirname "$ini")
+            if [ -f "$dir/src/secrets.example.h" ] && [ ! -f "$dir/src/secrets.h" ]; then
+              cp "$dir/src/secrets.example.h" "$dir/src/secrets.h"
+            fi
+            echo "::group::$dir"
+            pio run -d "$dir"
+            echo "::endgroup::"
+          done
+
+  hosttest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host tests (project 05, MSVC)
+        shell: pwsh
+        run: ./projects/05-powerwall-display/hosttest/run.ps1

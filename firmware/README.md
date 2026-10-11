@@ -1,7 +1,7 @@
 # Firmware images
 
 ## `factory/`: your own backups
-`tools/backup-flash.ps1` writes full 16 MB flash dumps here, named `<MAC>-<yyyyMMdd-HHmm>.bin`. They are **committed on purpose** (16 MB each), so a backup can't be lost with a working copy. `.gitignore` has an exception for `firmware/**/*.bin`.
+`tools/backup-flash.ps1` writes full 16 MB flash dumps here, named `<MAC>-<yyyyMMdd-HHmm>.bin`. They are **git-ignored** (`firmware/factory/*.bin`): a dump holds your board's MAC address, the vendor's firmware and anything the factory demo stored (such as Wi-Fi settings), so it must not go into a public repo. Keep a copy somewhere safe outside the repo.
 
 Restore one with:
 ```powershell
