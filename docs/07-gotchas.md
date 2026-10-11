@@ -19,7 +19,7 @@
 | Relays click when using audio (or vice versa) | IO1/2/40 are shared. Move the 0 Ω links R25–27 → R21–23 for audio. |
 | No sound | The amp needs the 0 Ω link move above. It plays the **right** I2S channel (CTRL tied high), so send mono to both slots. |
 | Backlight turns off when dimmed low | The driver cuts out somewhere below ~100/255 at 100 kHz (community figure; on unit 1, 100 is confirmed still lit). Use `B4848_LCD_BL_MIN`. For deeper dimming, see the hardware mod in [02](02-pinout.md). |
-| Backlight whines | Low PWM frequency. At 100 kHz there is no audible whine (verified on unit 1). `setBacklight()` attaches LEDC at 100 kHz. An earlier version called `analogWriteFrequency()` before the pin was attached; core 3.x silently ignores that, leaving it at 1 kHz. |
+| Backlight whines | Low PWM frequency. At 100 kHz there is no audible whine (verified on unit 1). `setBacklight()` attaches LEDC at `B4848_LCD_BL_FREQ_HZ` (100 kHz by default). An earlier version called `analogWriteFrequency()` before the pin was attached; core 3.x silently ignores that, leaving it at 1 kHz. |
 | Official espressif32 PIO platform fails with Arduino_GFX 1.6 | Use the **pioarduino** platform (Arduino core 3.x). The base ini already does. |
 | `-O2` in `build_flags` has no effect (identical firmware) | The Arduino core adds `-Os` after `build_flags` and the last `-O` wins. Use `build_unflags = -Os` as well (done in `common/platformio-base.ini`). |
 | Internal RAM is tight in LVGL projects | The defaults trade internal RAM for speed: 120-line buffer 115 KB, IRAM functions ~55 KB, about 87 KB left in `03`. For Wi-Fi/BLE, pass a smaller `bufLines` to `lvglBegin()` (e.g. 48). |

@@ -13,6 +13,9 @@ Plain-C++ checks of the network-side code, built with MSVC on the PC (no board n
   job due times, and save/load round trips on an in-memory SD card (`stubs/sd_store.h`, faked in test.cpp):
   no card, missing directory, version/size mismatches, truncated, too long and corrupt files, an 80 KB record.
 
+- `src/backlight_curve.h`: the brightness slider's gamma curve (endpoints, monotonic, min-but-on at 0 %, rounding,
+  empty ranges, inverse) and the saved-settings decoding (V2 percentage, V1 raw-duty conversion, rejects).
+
 Run from PowerShell:
 
 ```powershell

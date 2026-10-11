@@ -16,7 +16,16 @@
 //   s <n>      go to screen n (0..SCREEN_COUNT-1) the way a swipe does (refresh, slide, onShow)
 //   n / p      next / previous screen (like a swipe left / right)
 //   l          list the screens: "index name", the current one marked with *
-//   b <0-255>  set the backlight now (not saved; the panel driver cuts out below ~100)
+//   b <0-255>  set the backlight now (0-255 over the current duty range; not saved; the driver cuts out
+//              below about 100/255)
+//   bf <hz>    backlight PWM frequency 100..1000000 Hz (not saved); keeps the brightness, picks the highest
+//              duty resolution that frequency allows (9 bits at 100 kHz, 11 bits at 20-25 kHz)
+//   bd <duty>  raw backlight duty at the current resolution, 0..max (see br); not saved
+//   br         report backlight frequency, resolution, duty, max and the assumed minimum duty
+//   bs [steps [ms [from [to]]]]  sweep the raw duty from..to (default 0..max) in `steps` (default 16, 2..256)
+//              steps, `ms` apart (default 1000, 100..10000), printing a "bs i/n duty D" line per step, for
+//              watching the panel. Runs in the background; "bs 0" or any b/bd/bf command stops it. The
+//              brightness setting is restored at the end. Procedure: docs/02-pinout.md.
 //   m          print the memory / heap line now
 //   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
 //   v <0|1>    privacy mode for screenshots: placeholder Wi-Fi name and town (not saved)
@@ -265,17 +274,171 @@ static void cmdShot() {
     cmdReply("shot #ok");
 }
 
+// ---- backlight tuning (b*, see the top of the file) ----
+
+// Whitespace-separated integers, each in [lo, hi]; fills out[0..n). False on junk or a value out of range.
+static bool parseInts(const char *s, long lo, long hi, long *out, int maxN, int &n) {
+    n = 0;
+    while (*s) {
+        while (*s == ' ' || *s == '\t') s++;
+        if (!*s) break;
+        if (n == maxN) return false;
+        char *end = nullptr;
+        long v = strtol(s, &end, 10);
+        if (end == s || (*end != '\0' && *end != ' ' && *end != '\t') || v < lo || v > hi) return false;
+        out[n++] = v;
+        s = end;
+    }
+    return true;
+}
+
+static void cmdBacklightReport() {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "backlight %lu Hz, %u bits, duty %lu of %lu, assumed minimum %lu #ok",
+             (unsigned long)board4848::backlightFrequency(), (unsigned)board4848::backlightResolution(),
+             (unsigned long)board4848::backlightDuty(), (unsigned long)board4848::backlightDutyMax(),
+             (unsigned long)board4848::backlightMinDuty());
+    cmdReply(msg);
+}
+
+// Background duty sweep for watching the panel (bs). Advanced from loop() so LVGL keeps running.
+struct Sweep {
+    bool active = false;
+    int steps = 0, step = 0;
+    uint32_t from = 0, to = 0, periodMs = 0, lastMs = 0;
+};
+static Sweep s_sweep;
+
+static uint32_t sweepDuty(int i) {
+    const uint64_t span = s_sweep.to - s_sweep.from;
+    return s_sweep.from + static_cast<uint32_t>(span * static_cast<uint64_t>(i) / static_cast<uint64_t>(s_sweep.steps - 1));
+}
+
+static void sweepStop() {
+    if (!s_sweep.active) return;
+    s_sweep.active = false;
+    settingsApplyBacklight(); // back to the brightness setting
+}
+
+static void sweepStep() {
+    const uint32_t duty = sweepDuty(s_sweep.step);
+    board4848::setBacklightDuty(duty);
+    s_sweep.lastMs = millis();
+    char msg[96];
+    snprintf(msg, sizeof(msg), "bs %d/%d duty %lu @ %lu Hz", s_sweep.step + 1, s_sweep.steps, (unsigned long)duty,
+             (unsigned long)board4848::backlightFrequency());
+    cmdReply(msg);
+}
+
+static void sweepTick() {
+    if (!s_sweep.active || millis() - s_sweep.lastMs < s_sweep.periodMs) return;
+    if (++s_sweep.step >= s_sweep.steps) {
+        sweepStop();
+        cmdReply("bs done, brightness setting restored #ok");
+        return;
+    }
+    sweepStep();
+}
+
+// bs [steps [ms [from [to]]]]
+static void cmdSweep(const char *arg) {
+    long a[4];
+    int n;
+    const long maxDuty = static_cast<long>(board4848::backlightDutyMax());
+    if (!parseInts(arg, 0, 1000000, a, 4, n)) {
+        cmdReply("#err usage: bs [steps 2..256 [ms 100..10000 [from [to]]]] (bs 0 stops)");
+        return;
+    }
+    if (n >= 1 && a[0] == 0) {
+        const bool was = s_sweep.active;
+        sweepStop();
+        cmdReply(was ? "bs stopped, brightness setting restored #ok" : "bs not running #ok");
+        return;
+    }
+    const long steps = n >= 1 ? a[0] : 16;
+    const long ms = n >= 2 ? a[1] : 1000;
+    const long from = n >= 3 ? a[2] : 0;
+    const long to = n >= 4 ? a[3] : maxDuty;
+    char msg[96];
+    if (steps < 2 || steps > 256 || ms < 100 || ms > 10000 || from > to || to > maxDuty) {
+        snprintf(msg, sizeof(msg), "#err bs needs steps 2..256, ms 100..10000, 0 <= from <= to <= %ld", maxDuty);
+        cmdReply(msg);
+        return;
+    }
+    s_sweep.active = true;
+    s_sweep.steps = static_cast<int>(steps);
+    s_sweep.step = 0;
+    s_sweep.from = static_cast<uint32_t>(from);
+    s_sweep.to = static_cast<uint32_t>(to);
+    s_sweep.periodMs = static_cast<uint32_t>(ms);
+    snprintf(msg, sizeof(msg), "bs started: %ld steps, duty %ld..%ld, %ld ms apart #ok", steps, from, to, ms);
+    cmdReply(msg);
+    sweepStep();
+}
+
+// "b <0-255>", "bf <hz>", "bd <duty>", "br", "bs ...". `sub` is the letter after 'b' (0 for the plain b).
+static void handleBacklightCommand(char sub, const char *arg) {
+    long v = 0;
+    char msg[128];
+    if (sub == 's') {
+        cmdSweep(arg);
+        return;
+    }
+    if (s_sweep.active && sub != 'r') { // a manual setting takes over from a running sweep
+        s_sweep.active = false;
+    }
+    switch (sub) {
+        case 'f':
+            if (!parseInt(arg, 100, 1000000, v)) {
+                cmdReply("#err usage: bf <hz 100..1000000>");
+            } else if (!board4848::setBacklightFrequency(static_cast<uint32_t>(v))) {
+                cmdReply("#err LEDC refused that frequency");
+            } else {
+                cmdBacklightReport(); // not persisted; the duty was rescaled to the new resolution
+            }
+            break;
+        case 'd':
+            if (!parseInt(arg, 0, static_cast<long>(board4848::backlightDutyMax()), v)) {
+                snprintf(msg, sizeof(msg), "#err usage: bd <duty 0..%lu>", (unsigned long)board4848::backlightDutyMax());
+                cmdReply(msg);
+            } else {
+                board4848::setBacklightDuty(static_cast<uint32_t>(v)); // not persisted
+                cmdBacklightReport();
+            }
+            break;
+        case 'r':
+            cmdBacklightReport();
+            break;
+        default: // plain b
+            if (!parseInt(arg, 0, 255, v)) {
+                cmdReply("#err usage: b <0-255>");
+            } else {
+                board4848::setBacklight(static_cast<uint8_t>(v)); // not persisted
+                snprintf(msg, sizeof(msg), "backlight %ld #ok", v);
+                cmdReply(msg);
+            }
+            break;
+    }
+}
+
 static void handleCommand(char *line) {
     while (*line == ' ' || *line == '\t') line++;
     char cmd = *line;
     if (!cmd) return; // empty line
-    char *arg = line + 1;
+    // "bf", "bd", "br", "bs" are two-letter commands; every other command is one letter
+    char sub = 0;
+    char *rest = line + 1;
+    if (cmd == 'b' && (line[1] == 'f' || line[1] == 'd' || line[1] == 'r' || line[1] == 's')) {
+        sub = line[1];
+        rest = line + 2;
+    }
+    char *arg = rest;
     while (*arg == ' ' || *arg == '\t') arg++;
     // trim trailing blanks of the argument
     size_t n = strlen(arg);
     while (n && (arg[n - 1] == ' ' || arg[n - 1] == '\t')) arg[--n] = '\0';
     // "s3" works like "s 3", but a word such as "screens" is not "s"
-    if ((line[1] >= 'a' && line[1] <= 'z') || (line[1] >= 'A' && line[1] <= 'Z')) {
+    if ((rest[0] >= 'a' && rest[0] <= 'z') || (rest[0] >= 'A' && rest[0] <= 'Z')) {
         cmdReply("#err unknown command (h for help)");
         return;
     }
@@ -295,14 +458,7 @@ static void handleCommand(char *line) {
             cmdList();
             break;
         case 'b':
-            if (!parseInt(arg, 0, 255, v)) {
-                cmdReply("#err usage: b <0-255>");
-            } else {
-                board4848::setBacklight(static_cast<uint8_t>(v)); // not persisted
-                char msg[48];
-                snprintf(msg, sizeof(msg), "backlight %ld #ok", v);
-                cmdReply(msg);
-            }
+            handleBacklightCommand(sub, arg);
             break;
         case 'm':
             cmdMem();
@@ -330,8 +486,8 @@ static void handleCommand(char *line) {
             ESP.restart();
             break;
         case 'h':
-            cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | m memory | "
-                     "x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
+            cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | bf <hz> | bd <duty> | br | "
+                     "bs [steps ms from to] | m memory | x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");
@@ -374,7 +530,7 @@ void setup() {
     if (!gfx) halt("Display init failed (PSRAM missing? check memory_type = qio_opi)");
     gfx->fillScreen(RGB565_BLACK);
     memStep("display");
-    board4848::setBacklight(settingsGet().brightness); // default until the card's settings are read
+    settingsApplyBacklight(); // default (100 %) until the card's settings are read
 
     // After initDisplay(): the SD card shares the LCD init-bus pins. Mounts in the background.
     historyStart();
@@ -409,6 +565,7 @@ void setup() {
 
 void loop() {
     pollSerialCommands();
+    sweepTick();
 
     // Sleep only until the next LVGL timer is due (capped), so frames aren't delayed
     static uint32_t loopEnd; // DIAG

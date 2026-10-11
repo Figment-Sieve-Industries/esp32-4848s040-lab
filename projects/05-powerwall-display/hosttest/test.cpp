@@ -1,6 +1,6 @@
 // Host tests for the plain-C++ parts of project 05: the HTTP body framing (net_body.h: de-chunker and
-// read loop), the date parsers (time_util.cpp), the ENSO page/file parsers (enso.cpp, ENSO_HOST_TEST)
-// and the SD cache (cache.cpp, CACHE_HOST_TEST, on an in-memory card).
+// read loop), the date parsers (time_util.cpp), the ENSO page/file parsers (enso.cpp, ENSO_HOST_TEST),
+// the SD cache (cache.cpp, CACHE_HOST_TEST, on an in-memory card) and the brightness curve (backlight_curve.h).
 // Build and run: hosttest\run.ps1 (MSVC). Exit code = number of failed checks.
 #include <map>
 #include <set>
@@ -15,6 +15,7 @@
 #define gmtime_r(t, tm) gmtime_s(tm, t)
 #endif
 
+#include "../src/backlight_curve.h"
 #include "../src/net_body.h"
 #include "../src/time_util.cpp"
 #define ENSO_HOST_TEST 1
@@ -828,6 +829,92 @@ static void testCacheIo() {
     CHECK(cache::save("test", 1, rec, now - 1) && cache::load("test", 1, out, t));
 }
 
+// ---- backlight_curve.h (brightness slider gamma curve) ------------------------------------------
+
+static void testBacklightCurve() {
+    using namespace blcurve;
+    // The ranges the board produces: 100/255 of 9 bits (201..511) and of 11 bits (803..2047), the old 8-bit
+    // range, and a tiny one.
+    struct Range {
+        uint32_t lo, hi;
+    };
+    const Range ranges[] = {{201, 511}, {803, 2047}, {100, 255}, {1, 3}, {0, 1000}};
+
+    for (const Range &r : ranges) {
+        // endpoints, and 0 % is the floor (lit), not off
+        CHECK(dutyForPercent(0, r.lo, r.hi) == r.lo);
+        CHECK(dutyForPercent(100, r.lo, r.hi) == r.hi);
+        // clamping of the input
+        CHECK(dutyForPercent(-7, r.lo, r.hi) == r.lo);
+        CHECK(dutyForPercent(1000, r.lo, r.hi) == r.hi);
+        // monotonic non-decreasing and always inside [lo, hi]
+        uint32_t prev = r.lo;
+        for (int p = 0; p <= 100; p++) {
+            const uint32_t d = dutyForPercent(p, r.lo, r.hi);
+            CHECK(d >= prev);
+            CHECK(d >= r.lo && d <= r.hi);
+            prev = d;
+        }
+    }
+    CHECK(dutyForPercent(0, 201, 511) > 0);     // min-but-on: never zero while the minimum is non-zero
+    CHECK(dutyForPercent(0, 100, 255) == 100);  // B4848_LCD_BL_MIN at the old 8-bit resolution
+
+    // known values (gamma 2.2): 0.5^2.2 = 0.2176, 0.1^2.2 = 0.00631
+    CHECK(dutyForPercent(50, 201, 511) == 268);  // 201 + 67.47 -> 268
+    CHECK(dutyForPercent(10, 201, 511) == 203);  // 201 + 1.96 -> 203
+    CHECK(dutyForPercent(1, 201, 511) == 201);   // below half a step: stays at the floor
+    CHECK(dutyForPercent(50, 803, 2047) == 1074); // 803 + 270.7 -> 1074
+
+    // rounding is to nearest, not truncation: 0.2176 * 1000 = 217.6 -> 218, 0.2176 * 10 = 2.18 -> 2
+    CHECK(dutyForPercent(50, 0, 1000) == 218);
+    CHECK(dutyForPercent(50, 0, 10) == 2);
+    CHECK(dutyForPercent(99, 0, 1000) == 978);   // 0.99^2.2 = 0.97814
+
+    // finer steps at the bright end: strictly increasing from 15 % up with 11 bits
+    for (int p = 15; p < 100; p++) CHECK(dutyForPercent(p + 1, 803, 2047) > dutyForPercent(p, 803, 2047));
+
+    // the curve is below the straight line in the middle (that is the point of the gamma)
+    CHECK(dutyForPercent(50, 201, 511) < 201 + (511 - 201) / 2);
+
+    // empty or inverted range: the minimum
+    CHECK(dutyForPercent(80, 300, 300) == 300);
+    CHECK(dutyForPercent(80, 300, 200) == 300);
+    CHECK(dutyForPercent(100, 300, 300) == 300);
+
+    // inverse: exact where the curve is steep enough (11 bits, from 10 %), bounded elsewhere
+    for (int p = 10; p <= 100; p++) CHECK(percentForDuty(dutyForPercent(p, 803, 2047), 803, 2047) == p);
+    for (int p = 0; p < 10; p++) CHECK(percentForDuty(dutyForPercent(p, 803, 2047), 803, 2047) <= p + 1);
+    CHECK(percentForDuty(0, 201, 511) == 0);     // below the minimum
+    CHECK(percentForDuty(201, 201, 511) == 0);
+    CHECK(percentForDuty(511, 201, 511) == 100);
+    CHECK(percentForDuty(9999, 201, 511) == 100);
+    CHECK(percentForDuty(5, 7, 7) == 0);         // empty range
+
+    // saved settings: V2 holds the percentage
+    int pct = -1;
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V2, 55, 100, pct) && pct == 55);
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V2, 0, 100, pct) && pct == 0);
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V2, 100, 100, pct) && pct == 100);
+    pct = -1;
+    CHECK(!percentFromSaved(SETTINGS_MAGIC_V2, 101, 100, pct) && pct == -1); // out of range: rejected, untouched
+    CHECK(!percentFromSaved(SETTINGS_MAGIC_V2, 255, 100, pct));
+    // V1 (older firmware) holds the raw 8-bit duty 100..255 of the linear slider: same brightness, new position
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V1, 255, 100, pct) && pct == 100);
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V1, 100, 100, pct) && pct == 0);
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V1, 40, 100, pct) && pct == 0);  // below the old minimum
+    CHECK(percentFromSaved(SETTINGS_MAGIC_V1, 178, 100, pct) && pct >= 72 && pct <= 74); // (78/155)^(1/2.2) = 0.73
+    int last = 0;
+    for (int d = 0; d <= 255; d++) {
+        CHECK(percentFromSaved(SETTINGS_MAGIC_V1, (uint8_t)d, 100, pct) && pct >= last && pct <= 100);
+        last = pct;
+    }
+    // unknown or garbled magic is rejected
+    CHECK(!percentFromSaved(0, 50, 100, pct));
+    CHECK(!percentFromSaved(0x53455433, 50, 100, pct));
+    CHECK(!percentFromSaved(0xFFFFFFFFu, 50, 100, pct));
+    CHECK(SETTINGS_MAGIC_V1 == 0x53455431 && SETTINGS_MAGIC_V2 == 0x53455432); // on-disk values must not change
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
@@ -836,6 +923,7 @@ int main(int argc, char **argv) {
     testEnso();
     testCacheHelpers();
     testCacheIo();
+    testBacklightCurve();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }

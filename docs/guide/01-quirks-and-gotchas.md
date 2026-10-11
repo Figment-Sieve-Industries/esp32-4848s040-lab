@@ -292,9 +292,9 @@ Status key: F fixed, W worked-around, O open, D documented.
 ### Q-GFX-05 Backlight cut-out and a nearly invisible slider range
 - **Symptom:** The driver turns off below about 100/255 at 100 kHz. In project 05 the brightness slider (duty 100-255) barely changes anything (user report, 2026-10-11).
 - **Root cause (inferred):** The range is only 2.5x in duty, and perceived brightness is roughly logarithmic. The boost driver (U5, dimmed by gating its EN pin) also needs start-up time on each pulse. At 100 kHz a period is 10 us, so low and mid duties are compressed. That would explain a cut-out near 100 at 100 kHz but about 60 at a lower frequency.
-- **Fix:** Planned, not done: sweep the PWM frequency (100, 50, 25, 20 kHz) and duty with someone watching and listening; pick the lowest silent frequency; re-measure the minimum; add a gamma curve to the slider ([docs/02](../02-pinout.md) "Backlight dimming range"). A hardware mod (R12, FB wire) is the fallback.
+- **Fix:** Code is in (builds, not yet tried on hardware): configurable PWM frequency and resolution in the board library, a gamma slider in 05, serial `bf`/`bd`/`br`/`bs` for the sweep ([docs/02](../02-pinout.md) "Backlight dimming range" has the procedure). Still to do on the board: sweep 100/50/25/20/5 kHz with someone watching and listening, pick the lowest silent frequency, re-measure the minimum, then change `B4848_LCD_BL_FREQ_HZ` and `B4848_LCD_BL_MIN`. A hardware mod (R12, FB wire) is the fallback.
 - **Evidence:** Unit 1 is still lit at 100; the true cut-out is not measured ([hardware-log](../hardware-log.md)). Investigation: [inv-backlight-pwm](03-investigations.md#inv-backlight-pwm).
-- **Status:** open. **Applies to:** this board.
+- **Status:** open (tooling and gamma slider implemented, hardware sweep pending). **Applies to:** this board.
 
 <a id="q-gfx-06"></a>
 ### Q-GFX-06 `initDisplay()` aborts instead of failing when PSRAM is short

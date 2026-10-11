@@ -135,15 +135,136 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation, size_t bouncePx) {
     return gfx;
 }
 
-void setBacklight(uint8_t level) {
-    // Attach explicitly: analogWriteFrequency() is ignored on a pin that isn't attached yet
-    // (core 3.x), which left the PWM at 1 kHz. 100 kHz avoids audible coil whine.
-    static bool attached = false;
-    if (!attached) {
-        attached = ledcAttach(B4848_LCD_BL, 100000, 8);
-        if (!attached) return;
+// ---------------- Backlight ----------------
+// The LEDC pin is attached explicitly: analogWriteFrequency() is ignored on a pin that isn't attached yet
+// (core 3.x), which left the PWM at 1 kHz. 100 kHz (the default) avoids audible coil whine.
+// All state is behind one mutex: the UI core, the SD task and serial commands may all set the backlight.
+namespace {
+
+constexpr uint32_t LEDC_CLK_HZ = 80000000; // APB clock, the fastest LEDC source on the S3
+constexpr uint8_t BL_MIN_RES_BITS = 4;
+constexpr uint8_t BL_HW_RES_BITS = 14; // LEDC timer width on the S3
+constexpr uint32_t BL_MIN_HZ = 100;
+constexpr uint32_t BL_MAX_HZ = 1000000;
+
+struct BacklightState {
+    bool attached = false;
+    uint32_t hz = 0;
+    uint8_t bits = 0;
+    uint32_t duty = 0;
+} s_bl;
+
+SemaphoreHandle_t blMutex() {
+    static SemaphoreHandle_t m = xSemaphoreCreateMutex(); // C++11 static init is thread-safe
+    return m;
+}
+
+struct BlLock {
+    BlLock() { xSemaphoreTake(blMutex(), portMAX_DELAY); }
+    ~BlLock() { xSemaphoreGive(blMutex()); }
+    BlLock(const BlLock &) = delete;
+    BlLock &operator=(const BlLock &) = delete;
+};
+
+uint32_t dutyMax(uint8_t bits) { return (1UL << bits) - 1; }
+
+// Highest resolution (bits) with freq * 2^bits <= the LEDC clock, capped; 0 if even the minimum doesn't fit.
+uint8_t bestResolution(uint32_t hz) {
+    uint8_t b = B4848_LCD_BL_MAX_RES_BITS;
+    if (b > BL_HW_RES_BITS) b = BL_HW_RES_BITS;
+    while (b > BL_MIN_RES_BITS && (static_cast<uint64_t>(hz) << b) > LEDC_CLK_HZ) b--;
+    return (static_cast<uint64_t>(hz) << b) > LEDC_CLK_HZ ? 0 : b;
+}
+
+// Rounded rescale of a duty between resolutions (keeps the brightness fraction).
+uint32_t rescaleDuty(uint32_t duty, uint8_t fromBits, uint8_t toBits) {
+    const uint64_t fm = dutyMax(fromBits), tm = dutyMax(toBits);
+    if (fm == 0) return 0;
+    return static_cast<uint32_t>((static_cast<uint64_t>(duty) * tm + fm / 2) / fm);
+}
+
+// Attach or retune the LEDC pin to `hz`, trying lower resolutions if LEDC refuses. Lock held.
+bool blConfigure(uint32_t hz) {
+    for (uint8_t b = bestResolution(hz); b >= BL_MIN_RES_BITS; b--) {
+        uint32_t actual = 0;
+        if (!s_bl.attached) {
+            if (ledcAttach(B4848_LCD_BL, hz, b)) actual = ledcReadFreq(B4848_LCD_BL);
+        } else {
+            actual = ledcChangeFrequency(B4848_LCD_BL, hz, b);
+        }
+        if (actual != 0) {
+            const uint32_t d = s_bl.attached ? rescaleDuty(s_bl.duty, s_bl.bits, b) : 0;
+            s_bl.attached = true;
+            s_bl.hz = actual;
+            s_bl.bits = b;
+            s_bl.duty = d;
+            ledcWrite(B4848_LCD_BL, d);
+            return true;
+        }
     }
-    ledcWrite(B4848_LCD_BL, level);
+    return false;
+}
+
+bool blEnsure() { return s_bl.attached || blConfigure(B4848_LCD_BL_FREQ_HZ); } // lock held
+
+void blWrite(uint32_t duty) { // lock held
+    if (!blEnsure()) return;
+    const uint32_t m = dutyMax(s_bl.bits);
+    s_bl.duty = duty > m ? m : duty;
+    ledcWrite(B4848_LCD_BL, s_bl.duty);
+}
+
+} // namespace
+
+void setBacklight(uint8_t level) {
+    BlLock g;
+    if (!blEnsure()) return;
+    blWrite((static_cast<uint32_t>(level) * dutyMax(s_bl.bits) + 127) / 255);
+}
+
+void setBacklightLevel(float frac) {
+    BlLock g;
+    if (!blEnsure()) return;
+    if (!(frac > 0.0f)) frac = 0.0f; // also catches NaN
+    if (frac > 1.0f) frac = 1.0f;
+    blWrite(static_cast<uint32_t>(lroundf(frac * static_cast<float>(dutyMax(s_bl.bits)))));
+}
+
+void setBacklightDuty(uint32_t duty) {
+    BlLock g;
+    blWrite(duty);
+}
+
+bool setBacklightFrequency(uint32_t hz) {
+    if (hz < BL_MIN_HZ || hz > BL_MAX_HZ) return false;
+    BlLock g;
+    return blConfigure(hz);
+}
+
+uint32_t backlightFrequency() {
+    BlLock g;
+    return blEnsure() ? s_bl.hz : 0;
+}
+
+uint8_t backlightResolution() {
+    BlLock g;
+    return blEnsure() ? s_bl.bits : 0;
+}
+
+uint32_t backlightDuty() {
+    BlLock g;
+    return blEnsure() ? s_bl.duty : 0;
+}
+
+uint32_t backlightDutyMax() {
+    BlLock g;
+    return blEnsure() ? dutyMax(s_bl.bits) : 0;
+}
+
+uint32_t backlightMinDuty() {
+    BlLock g;
+    if (!blEnsure()) return 0;
+    return (static_cast<uint32_t>(B4848_LCD_BL_MIN) * dutyMax(s_bl.bits) + 254) / 255;
 }
 
 // ---------------- GT911 ----------------

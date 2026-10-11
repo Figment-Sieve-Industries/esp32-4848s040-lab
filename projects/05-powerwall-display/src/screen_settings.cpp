@@ -3,7 +3,6 @@
 #include "ui_common.h"
 #include "history.h"
 #include <Arduino.h>
-#include <Board4848S040_pins.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -28,16 +27,18 @@ void formatAge(char *buf, size_t n, uint32_t s) {
     else snprintf(buf, n, "%u h ago", (unsigned)(s / 3600));
 }
 
-void setPercent(int v) {
+// The slider position (0..100 %) is what is saved; history.cpp maps it through the gamma curve
+// (backlight_curve.h) onto the usable duty range. 0 % is the dimmest level that is still lit.
+void setPercent(int pct) {
     char buf[8];
-    snprintf(buf, sizeof(buf), "%d%%", (v * 100 + 127) / 255);
+    snprintf(buf, sizeof(buf), "%d%%", pct);
     ui::setText(s_lblPct, buf);
 }
 
 void sliderCb(lv_event_t *e) {
-    int v = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
-    setPercent(v);
-    settingsSetBrightness((uint8_t)v);
+    int pct = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+    setPercent(pct);
+    settingsSetBrightness(pct);
 }
 
 // Info line at the given y inside a card (full inner width, ellipsis when too long).
@@ -61,8 +62,8 @@ lv_obj_t *settingsCreate() {
     lv_obj_align(s_lblPct, LV_ALIGN_TOP_RIGHT, -PAD, 10);
 
     s_slider = lv_slider_create(s_cards[0]);
-    lv_slider_set_range(s_slider, B4848_LCD_BL_MIN, 255);
-    lv_slider_set_value(s_slider, settingsGet().brightness, LV_ANIM_OFF);
+    lv_slider_set_range(s_slider, blcurve::PCT_MIN, blcurve::PCT_MAX);
+    lv_slider_set_value(s_slider, settingsGet().brightnessPct, LV_ANIM_OFF);
     lv_obj_set_pos(s_slider, PAD + 14, 56);
     lv_obj_set_size(s_slider, INNER_W - 28, 12);
     lv_obj_set_ext_click_area(s_slider, 18); // 12 + 2*18 = 48 px touch height
@@ -139,9 +140,8 @@ void settingsRefresh() {
 }
 
 void settingsOnShow() {
-    uint8_t v = settingsGet().brightness;
-    if (v < B4848_LCD_BL_MIN) v = B4848_LCD_BL_MIN;
-    lv_slider_set_value(s_slider, v, LV_ANIM_OFF);
-    setPercent(v);
+    int pct = settingsGet().brightnessPct;
+    lv_slider_set_value(s_slider, pct, LV_ANIM_OFF);
+    setPercent(pct);
     ui::fadeIn(s_cards, 2, 0, 120);
 }

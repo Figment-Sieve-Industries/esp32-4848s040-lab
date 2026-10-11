@@ -35,8 +35,24 @@
 #define B4848_LCD_B4 15
 
 #define B4848_LCD_BL 38 // EN of U5 (AP3031-compatible boost LED driver), active high
-// Lowest duty that keeps the driver on at 100 kHz PWM. Community-measured (~102, joevial), not verified here.
+// Lowest duty (of 255) that keeps the driver on at 100 kHz PWM. Community-measured (~102, joevial), not
+// verified here. The library treats it as a FRACTION of the period (MIN/255) at any frequency or resolution
+// (see board4848::backlightMinDuty()), which is conservative if the real limit is an on-time. Override with
+// -DB4848_LCD_BL_MIN=<n> once a sweep has measured it (docs/02-pinout.md, "Backlight dimming range").
+#ifndef B4848_LCD_BL_MIN
 #define B4848_LCD_BL_MIN 100
+#endif
+// Backlight PWM frequency (Hz) used until a project calls board4848::setBacklightFrequency(). 100 kHz is
+// above hearing (no coil whine, verified on unit 1) but may compress the dimming range; do not change the
+// default without a hardware sweep. A project can override it with -DB4848_LCD_BL_FREQ_HZ=<hz>.
+#ifndef B4848_LCD_BL_FREQ_HZ
+#define B4848_LCD_BL_FREQ_HZ 100000
+#endif
+// Upper limit for the LEDC duty resolution (bits). The library uses the highest resolution the frequency
+// allows (f * 2^bits <= 80 MHz APB clock), capped here: 9 bits at 100 kHz, 11 bits at 20-25 kHz.
+#ifndef B4848_LCD_BL_MAX_RES_BITS
+#define B4848_LCD_BL_MAX_RES_BITS 12
+#endif
 
 #define B4848_LCD_WIDTH 480
 #define B4848_LCD_HEIGHT 480
