@@ -155,6 +155,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-FW-03](#q-fw-03) | No runtime flash writes: RTC memory semantics | D | Any ESP32 |
 | [Q-FW-04](#q-fw-04) | `millis()` back-off logic breaks after about 25 days | F | Any 32-bit tick counter |
 | [Q-FW-05](#q-fw-05) | Padding in checksummed snapshots | F | Any raw-struct CRC |
+| [Q-FW-06](#q-fw-06) | LEDC: `ledcReadFreq()` is 0 at duty 0; auto clock tops out below 80 MHz | F | Arduino-ESP32 3.2.x on the S3 |
 
 ### TOOL: toolchain and workflow
 
@@ -864,6 +865,14 @@ Checked with `curl` on 2026-10-11 around 12:00 UTC; full tables in [docs/11](../
 - **Fix:** `memcpy` the whole struct on restore, zero it first (`startDay()` memsets), assign members only, and `static_assert` that it is standard-layout and trivially copyable (`energy.cpp`).
 - **Evidence:** Found before it reached the device (2026-10-11).
 - **Status:** fixed. **Applies to:** any raw-struct CRC.
+
+<a id="q-fw-06"></a>
+### Q-FW-06 LEDC: `ledcReadFreq()` is 0 at duty 0, and the auto clock tops out below 80 MHz
+- **Symptom:** After the backlight-range change, `br` reported `0 Hz, 0 bits` and the boot log had a cascade of `ledcAttach(): No free timers available` and `Pin 38 is already attached to LEDC (channel 0, resolution 8)`. Host tests passed; only the hardware showed it.
+- **Root cause:** Two things. (1) IDF 5.4's `LEDC_AUTO_CLK` refused 100 kHz x 9 bits (51.2 MHz): `requested frequency 100000 and duty resolution 9 can not be achieved ... div_param=0`, although the S3's APB clock is 80 MHz. (2) The fallback to 8 bits then attached fine, but the code checked success with `ledcReadFreq()`, which returns 0 whenever the channel's duty is 0 (`if (!ledcRead(pin)) return 0;` in `esp32-hal-ledc.c`). That looked like a failure, so the next attempt found the pin already attached.
+- **Fix:** plan resolutions against 40 MHz (`freq x 2^bits <= 40 MHz`: 8 bits at 100 kHz, 10 bits at 20-25 kHz) and treat a `true` from `ledcAttach()` as success (`Board4848S040.cpp`). `ledcChangeFrequency()` returns the real frequency and is fine to check.
+- **Evidence:** Unit 1 boot logs before and after, 2026-10-11; after the fix `br` gives `backlight 100000 Hz, 8 bits, duty 255 of 255, assumed minimum 100` and `bf 25000` gives 10 bits.
+- **Status:** fixed. **Applies to:** Arduino-ESP32 3.2.x LEDC on the S3.
 
 ---
 

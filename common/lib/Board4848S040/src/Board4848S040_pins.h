@@ -49,7 +49,7 @@
 #define B4848_LCD_BL_FREQ_HZ 100000
 #endif
 // Upper limit for the LEDC duty resolution (bits). The library uses the highest resolution the frequency
-// allows (f * 2^bits <= 80 MHz APB clock), capped here: 9 bits at 100 kHz, 11 bits at 20-25 kHz.
+// allows (f * 2^bits <= 40 MHz; IDF's auto clock refused 51.2 MHz), capped here: 8 bits at 100 kHz, 10 bits at 20-25 kHz.
 #ifndef B4848_LCD_BL_MAX_RES_BITS
 #define B4848_LCD_BL_MAX_RES_BITS 12
 #endif

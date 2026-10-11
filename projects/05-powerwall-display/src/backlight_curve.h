@@ -12,8 +12,8 @@
 // slider never switches the panel off. 0 % is "dimmest that is still lit", not "off"; turning the
 // backlight fully off is not offered on the slider (serial `b 0` still does it).
 //
-// The first few positions can share one duty when the range is coarse (9 bits at 100 kHz leaves about 310
-// steps; the lowest ~5 positions round to minDuty). More resolution at a lower PWM frequency fixes that.
+// The first few positions can share one duty when the range is coarse (8 bits at 100 kHz leaves 155
+// steps; the lowest ~8 positions round to minDuty). More resolution at a lower PWM frequency fixes that.
 #include <math.h>
 #include <stdint.h>
 

@@ -833,12 +833,12 @@ static void testCacheIo() {
 
 static void testBacklightCurve() {
     using namespace blcurve;
-    // The ranges the board produces: 100/255 of 9 bits (201..511) and of 11 bits (803..2047), the old 8-bit
-    // range, and a tiny one.
+    // The ranges the board produces: 100/255 of 8 bits (100..255, 100 kHz) and of 10 bits (402..1023, 20-25 kHz),
+    // plus finer 9/11-bit ranges, a tiny one and a zero minimum.
     struct Range {
         uint32_t lo, hi;
     };
-    const Range ranges[] = {{201, 511}, {803, 2047}, {100, 255}, {1, 3}, {0, 1000}};
+    const Range ranges[] = {{100, 255}, {402, 1023}, {201, 511}, {803, 2047}, {1, 3}, {0, 1000}};
 
     for (const Range &r : ranges) {
         // endpoints, and 0 % is the floor (lit), not off

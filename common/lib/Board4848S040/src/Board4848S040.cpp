@@ -141,7 +141,9 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation, size_t bouncePx) {
 // All state is behind one mutex: the UI core, the SD task and serial commands may all set the backlight.
 namespace {
 
-constexpr uint32_t LEDC_CLK_HZ = 80000000; // APB clock, the fastest LEDC source on the S3
+// Budget for freq * 2^bits. The S3 has an 80 MHz APB source, but IDF 5.4's LEDC_AUTO_CLK refused
+// 100 kHz x 9 bits (51.2 MHz, "div_param=0") on hardware, so plan with 40 MHz: 8 bits at 100 kHz.
+constexpr uint32_t LEDC_CLK_HZ = 40000000;
 constexpr uint8_t BL_MIN_RES_BITS = 4;
 constexpr uint8_t BL_HW_RES_BITS = 14; // LEDC timer width on the S3
 constexpr uint32_t BL_MIN_HZ = 100;
@@ -188,7 +190,9 @@ bool blConfigure(uint32_t hz) {
     for (uint8_t b = bestResolution(hz); b >= BL_MIN_RES_BITS; b--) {
         uint32_t actual = 0;
         if (!s_bl.attached) {
-            if (ledcAttach(B4848_LCD_BL, hz, b)) actual = ledcReadFreq(B4848_LCD_BL);
+            // Not ledcReadFreq(): it returns 0 while the duty is 0 (a fresh channel), which looked like a
+            // failure and the next attempt then hit "already attached".
+            if (ledcAttach(B4848_LCD_BL, hz, b)) actual = hz;
         } else {
             actual = ledcChangeFrequency(B4848_LCD_BL, hz, b);
         }

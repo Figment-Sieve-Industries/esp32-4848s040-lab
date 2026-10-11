@@ -585,7 +585,7 @@ The 2 GB card before the fix: 1 MB write failed in all 3 runs. The 256 KB patter
 - The hardware mod only if A falls short.
 
 **Implemented (builds; not flashed, nothing measured yet).**
-- Board library: `B4848_LCD_BL_FREQ_HZ` (default stays 100 kHz), `setBacklightFrequency()` retunes at run time and picks the highest duty resolution (9 bits at 100 kHz, 11 bits at 20-25 kHz), plus `setBacklightDuty/Level()` and getters. `backlightMinDuty()` scales `B4848_LCD_BL_MIN` as a fraction of the period.
+- Board library: `B4848_LCD_BL_FREQ_HZ` (default stays 100 kHz), `setBacklightFrequency()` retunes at run time and picks the highest duty resolution (8 bits at 100 kHz, 10 bits at 20-25 kHz), plus `setBacklightDuty/Level()` and getters. `backlightMinDuty()` scales `B4848_LCD_BL_MIN` as a fraction of the period.
 - Project 05: slider 0-100 % through `duty = min + (max - min) * (pct/100)^2.2` (`backlight_curve.h`, host-tested); 0 % is min-but-on. Settings store the percentage (`SET2`); old raw-duty files (`SET1`) are converted on load.
 - Serial `bf <hz>`, `bd <duty>`, `br`, `bs [steps ms from to]` for the sweep; procedure in [02-pinout](../02-pinout.md).
 - Design note (inferred): the sweep must start below the assumed minimum, because the cut-out at other frequencies may be lower than 100/255; that is why `bs` defaults to `from` = 0.

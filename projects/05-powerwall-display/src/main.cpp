@@ -19,7 +19,7 @@
 //   b <0-255>  set the backlight now (0-255 over the current duty range; not saved; the driver cuts out
 //              below about 100/255)
 //   bf <hz>    backlight PWM frequency 100..1000000 Hz (not saved); keeps the brightness, picks the highest
-//              duty resolution that frequency allows (9 bits at 100 kHz, 11 bits at 20-25 kHz)
+//              duty resolution that frequency allows (8 bits at 100 kHz, 10 bits at 20-25 kHz)
 //   bd <duty>  raw backlight duty at the current resolution, 0..max (see br); not saved
 //   br         report backlight frequency, resolution, duty, max and the assumed minimum duty
 //   bs [steps [ms [from [to]]]]  sweep the raw duty from..to (default 0..max) in `steps` (default 16, 2..256)

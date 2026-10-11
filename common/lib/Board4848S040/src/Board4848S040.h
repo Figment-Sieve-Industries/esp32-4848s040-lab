@@ -14,7 +14,7 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_L
 
 // ---- Backlight: LEDC PWM on the EN pin of the boost driver ----
 // The PWM starts at B4848_LCD_BL_FREQ_HZ (default 100 kHz) with the highest duty resolution LEDC allows at that
-// frequency (capped at B4848_LCD_BL_MAX_RES_BITS): 9 bits at 100 kHz, 11 bits at 20-25 kHz.
+// frequency (capped at B4848_LCD_BL_MAX_RES_BITS): 8 bits at 100 kHz, 10 bits at 20-25 kHz.
 // The first call of any setter attaches the pin. The duty is kept across frequency changes (rescaled).
 
 // Brightness 0..255 (0 = off), mapped linearly onto the current duty resolution (255 = full duty).
@@ -37,7 +37,7 @@ uint8_t backlightResolution();   // duty resolution in bits
 uint32_t backlightDuty();        // current raw duty
 uint32_t backlightDutyMax();     // 2^resolution - 1 = full duty
 // B4848_LCD_BL_MIN (of 255) scaled to the current resolution, rounded up: the lowest duty that is assumed
-// to keep the driver on. 100/255 -> 201 at 9 bits, 803 at 11 bits (the same fraction at any frequency).
+// to keep the driver on. 100/255 -> 100 at 8 bits, 402 at 10 bits (the same fraction at any frequency).
 uint32_t backlightMinDuty();
 
 struct TouchPoint {

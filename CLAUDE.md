@@ -54,7 +54,7 @@ Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits on
 
 ## Library API (`#include <Board4848S040.h>`, namespace `board4848`)
 - `Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX)`: ST7701 init over 3-wire SPI, 12 MHz RGB, framebuffer in PSRAM, bounce buffers on (they stop the flicker; verified on hardware)
-- `void setBacklight(uint8_t level)`: LEDC, 100 kHz by default (`B4848_LCD_BL_FREQ_HZ`), highest duty resolution for that frequency (9 bits at 100 kHz). The driver cuts out below ~100/255 (`B4848_LCD_BL_MIN`). Also `setBacklightLevel(float)`, `setBacklightDuty(raw)`, `bool setBacklightFrequency(hz)` and getters `backlightFrequency/Resolution/Duty/DutyMax/MinDuty()`; the frequency default changes only after the hardware sweep (docs/02-pinout.md).
+- `void setBacklight(uint8_t level)`: LEDC, 100 kHz by default (`B4848_LCD_BL_FREQ_HZ`), highest duty resolution for that frequency (8 bits at 100 kHz). The driver cuts out below ~100/255 (`B4848_LCD_BL_MIN`). Also `setBacklightLevel(float)`, `setBacklightDuty(raw)`, `bool setBacklightFrequency(hz)` and getters `backlightFrequency/Resolution/Duty/DutyMax/MinDuty()`; the frequency default changes only after the hardware sweep (docs/02-pinout.md).
 - `Touch`:
   - `begin()` probes GT911 at 0x5D/0x14 and checks the product ID "911"
   - `read(points, max)` returns `-1` for no new data, `0` for released, or `n` points

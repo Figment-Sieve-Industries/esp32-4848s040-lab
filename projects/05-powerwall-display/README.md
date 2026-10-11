@@ -178,9 +178,9 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 | `n` / `p` | Next / previous screen (wraps) |
 | `l` | List the screens, the current one marked `*` |
 | `b <0-255>` | Set the backlight now over the current duty range (not saved; the panel driver cuts out below about 100/255) |
-| `bf <hz>` | Backlight PWM frequency, 100 to 1000000 Hz (not saved). Keeps the brightness and uses the highest duty resolution that frequency allows (9 bits at 100 kHz, 11 bits at 20 to 25 kHz). Replies with the same line as `br` |
+| `bf <hz>` | Backlight PWM frequency, 100 to 1000000 Hz (not saved). Keeps the brightness and uses the highest duty resolution that frequency allows (8 bits at 100 kHz, 10 bits at 20 to 25 kHz). Replies with the same line as `br` |
 | `bd <duty>` | Raw backlight duty at the current resolution, 0 to the maximum shown by `br` (not saved) |
-| `br` | Report the backlight: `backlight 100000 Hz, 9 bits, duty 511 of 511, assumed minimum 201 #ok` |
+| `br` | Report the backlight: `backlight 100000 Hz, 8 bits, duty 255 of 255, assumed minimum 100 #ok` |
 | `bs [steps [ms [from [to]]]]` | Watch-the-panel sweep: steps the raw duty from `from` to `to` (default 0 to the maximum) in `steps` steps (default 16, 2 to 256), `ms` apart (default 1000, 100 to 10000), printing `bs i/n duty D @ F Hz` per step. Runs in the background; `bs 0` or any `b`, `bd` or `bf` stops it. The brightness setting comes back at the end (`bs done ... #ok`) |
 | `m` | Print the memory and heap line |
 | `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |
