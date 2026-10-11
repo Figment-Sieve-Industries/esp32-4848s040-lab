@@ -205,6 +205,8 @@ void Touch::transform(TouchPoint &p) const {
         p.x = B4848_LCD_HEIGHT - 1 - py;
         p.y = px;
         break;
+    default: // 0: panel and logical coordinates are the same
+        break;
     }
 }
 

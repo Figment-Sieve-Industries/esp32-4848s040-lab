@@ -12,3 +12,9 @@ __pycache__/
 
 # Per-project credentials (copy secrets.example.h -> secrets.h)
 **/src/secrets.h
+
+# Serial test logs (06-sd-card-test/sd_serial.py)
+sd_serial_*.log
+
+# clang-tidy compilation database (tools/lint.ps1 moves it to %TEMP%; this is a safety net)
+compile_commands.json

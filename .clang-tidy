@@ -1,0 +1,24 @@
+# clang-tidy checks for all projects. Run via tools/lint.ps1, which feeds clang-tidy a compilation database
+# (pio run -t compiledb, translated for clang) so it sees the real include paths and defines.
+# Bug-finding checks only; naming and modernisation style is left alone.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-reserved-identifier,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.*,
+  -clang-analyzer-optin.performance.Padding,
+  performance-*,
+  -performance-enum-size,
+  misc-redundant-expression,
+  misc-misplaced-const,
+  readability-misleading-indentation,
+  readability-suspicious-call-argument
+WarningsAsErrors: ''
+# Only the project's own src/include and our common/lib libraries (not common/lib/SD, a patched upstream copy). Library
+# headers live under .pio/libdeps/*/src and must not match, so 'src' is only accepted directly after projects/<name>/
+# (no lookahead in clang-tidy's regex). Add a new shared library here when it is ours.
+HeaderFilterRegex: '(projects[/\\][^/\\]+[/\\](src|include)|common[/\\]lib[/\\](Board4848S040|SdStore))[/\\].*'
