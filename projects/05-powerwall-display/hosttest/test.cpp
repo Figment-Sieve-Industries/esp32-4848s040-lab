@@ -1073,6 +1073,14 @@ static void testDayHistoryCalc() {
         localtime_r(&tt, &tm);
         return tm.tm_hour;
     };
+    // Some MSVC runtimes (the GitHub Windows runner) ignore the DST part of TZ: 12:00 UTC on 1 July must
+    // be 08:00 EDT. Without DST rules these checks can't run, so skip them rather than fail.
+    if (hourAt(2026, 7, 1, 12, 0) != 8) {
+        printf("SKIP DST binning checks: this C runtime applies no DST rules for TZ=EST5EDT\n");
+        _putenv_s("TZ", "");
+        _tzset();
+        return;
+    }
     CHECK(hourAt(2026, 11, 1, 5, 30) == 1 && hourAt(2026, 11, 1, 6, 30) == 1); // 01:30 EDT and 01:30 EST
     CHECK(hourAt(2026, 3, 8, 6, 30) == 1 && hourAt(2026, 3, 8, 7, 30) == 3);   // 01:30 EST, then 03:30 EDT
     float a[24] = {}, b[24] = {}, c[24] = {}, e[24] = {};
