@@ -25,6 +25,7 @@ lv_obj_t *s_hourCol[HOURS], *s_hourLbl[HOURS], *s_hourIco[HOURS], *s_hourTemp[HO
 int s_hourIconKey[HOURS];
 int s_bigIconKey = -1;
 lv_obj_t *s_lifeCard, *s_lifeVal[3];
+lv_obj_t *s_place; // location caption (ui::placeName: privacy mode shows a placeholder)
 
 // Fixed-size flex container, children aligned to the start
 lv_obj_t *plainBox(lv_obj_t *parent, int w, int h, lv_flex_flow_t flow) {
@@ -71,8 +72,8 @@ lv_obj_t *lifeSlot(lv_obj_t *row, const char *head, lv_color_t color, const char
 lv_obj_t *weatherCreate() {
     lv_obj_t *scr = ui::screenCreate(ui::SCR_WEATHER);
 
-    lv_obj_t *cap = ui::caption(scr, ui::MUTED, WEATHER_NAME);
-    lv_obj_set_pos(cap, 24, 54);
+    s_place = ui::caption(scr, ui::MUTED, ui::placeName());
+    lv_obj_set_pos(s_place, 24, 54);
 
     // Current conditions row
     lv_obj_t *row = ui::flex(scr, LV_FLEX_FLOW_ROW, 16);
@@ -112,6 +113,7 @@ lv_obj_t *weatherCreate() {
 }
 
 void weatherRefresh() {
+    ui::setText(s_place, ui::placeName());
     WeatherData w = weatherData();
     char buf[64];
     const bool wxOk = !isStale(w.valid, w.updatedMs, WEATHER_STALE_MS);

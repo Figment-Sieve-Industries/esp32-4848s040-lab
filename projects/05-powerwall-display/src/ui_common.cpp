@@ -1,6 +1,7 @@
 #include "ui_common.h"
 #include "icons.h"
 #include "powerwall.h"
+#include "secrets.h" // WEATHER_NAME (placeName)
 #include <Arduino.h>
 #include <src/core/lv_global.h> // private: anim list access for pauseScreenAnimations
 #include <math.h>
@@ -178,6 +179,11 @@ TopBar topBarCreate(lv_obj_t *scr) {
     return tb;
 }
 
+static bool s_privacy;
+void setPrivacy(bool on) { s_privacy = on; }
+bool privacy() { return s_privacy; }
+const char *placeName() { return s_privacy ? "MY TOWN" : WEATHER_NAME; }
+
 void topBarUpdate(TopBar &tb) {
     char buf[64];
     struct tm tm;
@@ -188,7 +194,7 @@ void topBarUpdate(TopBar &tb) {
         setText(tb.date, buf);
     }
     NetStatus n = networkStatus();
-    if (n.wifiUp) snprintf(buf, sizeof(buf), "%s  %d dBm", n.ssid, n.rssi);
+    if (n.wifiUp) snprintf(buf, sizeof(buf), "%s  %d dBm", privacy() ? "Wi-Fi" : n.ssid, n.rssi);
     else snprintf(buf, sizeof(buf), "offline");
     setTextColor(tb.wifi, n.wifiUp ? MUTED : C_ALERT);
     if (strcmp(lv_label_get_text(tb.wifi), buf) != 0) { // re-align only when the width may have changed

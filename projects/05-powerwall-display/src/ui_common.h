@@ -138,6 +138,12 @@ Banner bannerCreate(lv_obj_t *scr, int y, int h, const char *caption, int subW =
 void bannerSet(Banner &b, lv_color_t fg, lv_color_t bg, const char *name, bool dim, const char *sub, size_t bigMaxLen,
                const lv_font_t *big, const lv_font_t *small);
 
+// Privacy mode for screenshots/demos (serial "v 1"): the top bar shows "Wi-Fi" instead of the SSID and
+// placeName() returns a placeholder instead of WEATHER_NAME. Not saved; off after a reboot.
+void setPrivacy(bool on);
+bool privacy();
+const char *placeName(); // WEATHER_NAME as configured, or "MY TOWN" in privacy mode (upper case)
+
 // Screen registry: screenCreate(index) = screenCreate() + top bar + page dots for that index. The top
 // bar is then updated centrally by main (topBarUpdateFor(current)); screens don't keep a TopBar.
 lv_obj_t *screenCreate(int index);

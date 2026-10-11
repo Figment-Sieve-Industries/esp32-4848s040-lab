@@ -19,6 +19,8 @@
 //   b <0-255>  set the backlight now (not saved; the panel driver cuts out below ~100)
 //   m          print the memory / heap line now
 //   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
+//   v <0|1>    privacy mode for screenshots: placeholder Wi-Fi name and town (not saved)
+//   r          reboot (ESP.restart; RTC data and the system clock survive)
 //   h          help
 #include <Arduino.h>
 #include <Board4848S040.h>
@@ -118,11 +120,14 @@ static uint32_t s_maxGapMs;   // longest gap between rendered frames in the hear
 // DIAG stutter: invalidated areas of the frame being rendered (count, pixels, bounding box)
 static uint32_t s_invN, s_invPx, s_refrStart;
 static lv_area_t s_invBox;
+static constexpr uint32_t DIAG_AREAS = 16;
+static lv_area_t s_invList[DIAG_AREAS]; // first areas of the frame, printed with a slow render
 // O13 redraw load over the heartbeat window: invalidated pixels (overlaps counted twice) and flushes
 static uint32_t s_invPxWindow, s_flushWindow;
 static void invalidateCb(lv_event_t *e) {
     const lv_area_t *a = static_cast<const lv_area_t *>(lv_event_get_param(e));
     if (!a) return;
+    if (s_invN < DIAG_AREAS) s_invList[s_invN] = *a;
     if (s_invN++ == 0) s_invBox = *a;
     else {
         s_invBox.x1 = LV_MIN(s_invBox.x1, a->x1);
@@ -142,6 +147,13 @@ static void frameCb(lv_event_t *) {
         Serial.printf("  [slow] render %lu ms: %lu areas, %lu px, box %ld,%ld-%ld,%ld\n", (unsigned long)renderMs,
                       (unsigned long)s_invN, (unsigned long)s_invPx, (long)s_invBox.x1, (long)s_invBox.y1,
                       (long)s_invBox.x2, (long)s_invBox.y2);
+    if (renderMs > 100 && s_invN > 30) {
+        Serial.print("  [slow] first areas:");
+        for (uint32_t i = 0; i < s_invN && i < DIAG_AREAS; i++)
+            Serial.printf(" %ld,%ld %ldx%ld", (long)s_invList[i].x1, (long)s_invList[i].y1,
+                          (long)lv_area_get_width(&s_invList[i]), (long)lv_area_get_height(&s_invList[i]));
+        Serial.println();
+    }
     s_invN = s_invPx = 0;
     static uint32_t last;
     uint32_t now = millis(), gap = now - last;
@@ -296,9 +308,24 @@ static void handleCommand(char *line) {
         case 'x':
             cmdShot();
             break;
+        case 'v':
+            if (!parseInt(arg, 0, 1, v)) {
+                cmdReply("#err usage: v <0|1>");
+            } else {
+                ui::setPrivacy(v != 0);
+                screens[current].refresh();
+                cmdReply(v ? "privacy on #ok" : "privacy off #ok");
+            }
+            break;
+        case 'r':
+            cmdReply("rebooting #ok");
+            Serial.flush();
+            delay(100);
+            ESP.restart();
+            break;
         case 'h':
             cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | m memory | "
-                     "x screenshot | h help #ok");
+                     "x screenshot | v <0|1> privacy | r reboot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");

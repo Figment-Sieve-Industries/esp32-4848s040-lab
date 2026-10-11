@@ -67,6 +67,7 @@ struct Key {
     int dark = -2;          // -1 unknown, 0 light, 1 dark
     int slot = -2;
     bool valid = false;
+    bool privacy = false;   // place name in the hint (ui::privacy)
     bool operator==(const Key &) const = default;
 };
 ui::ChangeGate<Key> s_gate;
@@ -116,8 +117,8 @@ int barHeight(float v) {
 int thresholdY(float nt) { return CHART_H - static_cast<int>(lroundf(nt / CHART_CAP * CHART_H)); }
 
 // "LONDON" -> "London"; very long names fall back to "here".
-void placeName(char *out, size_t n) {
-    const char *src = WEATHER_NAME;
+void titleCasePlace(char *out, size_t n) {
+    const char *src = ui::placeName();
     if (!src || !*src || strlen(src) > 14) {
         snprintf(out, n, "here");
         return;
@@ -250,7 +251,7 @@ void updateHint(const AuroraData &a, bool stale, int cloudPct, int dark) {
         snprintf(buf, sizeof(buf), "--");
     } else if (quiet) {
         char place[20];
-        placeName(place, sizeof(place));
+        titleCasePlace(place, sizeof(place));
         snprintf(buf, sizeof(buf), "Visible from %s? Not expected tonight", place);
     } else if (dark == 0) {
         snprintf(buf, sizeof(buf), "Possible after dark: look north");
@@ -306,6 +307,7 @@ void update(bool force) {
     key.dark = dark;
     key.slot = k.nowSlot;
     key.valid = a.valid;
+    key.privacy = ui::privacy();
     if (!s_gate.changed(key, force)) return;
 
     updateStatus(a, k, aStale, kStale);

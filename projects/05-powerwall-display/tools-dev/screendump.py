@@ -114,6 +114,7 @@ def main():
     ap.add_argument("out", help="PNG path; with --all, a prefix (out-<n>-<name>.png)")
     ap.add_argument("--screen", type=int, help="switch to this screen first (s <n>)")
     ap.add_argument("--all", action="store_true", help="capture every screen (uses l and s <n>)")
+    ap.add_argument("--privacy", action="store_true", help="placeholder Wi-Fi name and town while capturing (v 1 / v 0)")
     ap.add_argument("--settle", type=float, default=2.0, help="seconds to wait after switching screens")
     a = ap.parse_args()
 
@@ -123,6 +124,8 @@ def main():
     ser.dtr = False
     ser.rts = False
     ser.open()
+    if a.privacy:
+        print(command(ser, "v 1"))
     targets = []
     if a.all:
         listing = command(ser, "l")  # "screens: 0*house, 1 today, ... #ok" (* = current)
@@ -141,6 +144,8 @@ def main():
         with open(out, "wb") as f:
             f.write(png_bytes(w, h, to_rgb(w, h, rot, fb)))
         print("%s: %dx%d, %d missing rows, crc %s" % (out, w, h, len(missing), "ok" if crc_ok else "MISMATCH"))
+    if a.privacy:
+        print(command(ser, "v 0"))
     ser.close()
 
 
