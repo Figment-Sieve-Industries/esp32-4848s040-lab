@@ -13,9 +13,14 @@
 //
 // Serial commands (115200 baud, CH340C on UART0). They drive the UI for testing and are read without
 // blocking in loop(). One line in, one line out, ending in "#ok" or "#err <reason>":
-//   s <n>      go to screen n (0..SCREEN_COUNT-1) the way a swipe does (refresh, slide, onShow)
-//   n / p      next / previous screen (like a swipe left / right)
-//   l          list the screens: "index name", the current one marked with *
+//   s <n>      go to screen n (0..SCREEN_COUNT-1) the way a swipe does (refresh, slide, onShow);
+//              "#err screen disabled" if n is switched off in Settings
+//   n / p      next / previous enabled screen (like a swipe left / right)
+//   l          list the screens: "index name", the current one marked with *, disabled ones with -
+//   e [n 0|1]  enable / disable optional screen n (same as its Settings switch, saved); "e" alone lists the
+//              mask. History, battery & grid, weather, moon, aurora, sun and El Nino can be switched off;
+//              house, today, settings and about can't. A disabled screen is skipped by swipes and its
+//              background fetches stop (see syncScreenMask)
 //   b <0-255>  set the backlight now (0-255 over the current duty range; not saved; the driver cuts out
 //              below about 100/255)
 //   bf <hz>    backlight PWM frequency 100..1000000 Hz (not saved); keeps the brightness, picks the highest
@@ -45,6 +50,7 @@
 #include "day_history.h"
 #include "energy.h"
 #include "history.h"
+#include "settings_codec.h"
 #include "net_http.h"
 #include "powerwall.h"
 #include "screens.h"
@@ -89,7 +95,45 @@ static ScreenDef screens[ui::SCREEN_COUNT] = {
     {"about", aboutCreate, aboutRefresh, nullptr, nullptr},
 };
 static_assert(sizeof(screens) / sizeof(screens[0]) == ui::SCREEN_COUNT, "one entry per screen, in ScreenIndex order");
+static_assert(ui::SCREEN_COUNT == setcodec::SCREEN_COUNT, "settings_codec.h mask width must match ScreenIndex");
 static int current = 0;
+
+// ---- optional screens (Settings switches / the e command) ----
+
+static void gotoScreen(int next, int direction);
+
+// Which background jobs (powerwall.cpp JOBS) feed a screen; switched off with it. Weather is not listed: the
+// house screen's weather card needs that data, so the weather job always runs. History keeps logging too.
+struct ScreenJobs {
+    int screen;
+    const char *jobs[2];
+};
+static const ScreenJobs SCREEN_JOBS[] = {
+    {ui::SCR_MOON, {"moon", nullptr}},
+    {ui::SCR_AURORA, {"aurora", "kp"}},
+    {ui::SCR_SUN, {"swpc", "sunimg"}},
+    {ui::SCR_ENSO, {"enso", nullptr}},
+};
+
+static uint16_t s_appliedMask = setcodec::ALL_SCREENS;
+
+// Brings the UI and the network jobs in line with the saved mask. Cheap when nothing changed (one mutex
+// hand-off), so it runs on every refresh tick and before every navigation.
+static uint16_t syncScreenMask() {
+    const uint16_t m = setcodec::normalizeMask(settingsGet().screenMask);
+    if (m == s_appliedMask) return m;
+    s_appliedMask = m;
+    ui::setScreenMask(m);
+    for (const ScreenJobs &sj : SCREEN_JOBS) {
+        for (const char *job : sj.jobs) {
+            if (job) netSetJobEnabled(job, setcodec::screenOn(m, sj.screen));
+        }
+    }
+    Serial.printf("screens: mask 0x%03x\n", (unsigned)m);
+    // Only a serial command can switch off the shown screen (its switch lives on Settings)
+    if (!setcodec::screenOn(m, current)) gotoScreen(ui::SCR_SETTINGS, current < ui::SCR_SETTINGS ? +1 : -1);
+    return m;
+}
 
 // ---- navigation ----
 
@@ -114,12 +158,13 @@ static void gotoScreen(int next, int direction) {
 }
 
 // Called from ui_common.cpp's gesture handler
-void navSwipe(int direction) { gotoScreen((current + direction + ui::SCREEN_COUNT) % ui::SCREEN_COUNT, direction); }
+void navSwipe(int direction) { gotoScreen(setcodec::nextScreen(current, direction, syncScreenMask()), direction); }
 
 extern volatile uint8_t g_netPhase; // DIAG stutter: 0 idle, 1 gateway poll, 2 background job
 
 static void refreshCb(lv_timer_t *) {
     uint32_t t0 = millis(); // DIAG
+    syncScreenMask();
     PwData pw = powerwallData();
     energyUpdate(pw); // always, so today's totals keep counting
     dayhist::dayHistoryUpdate(pw, energyToday()); // today's hourly bins for the history screen
@@ -211,7 +256,9 @@ static bool parseInt(const char *s, long lo, long hi, long &out) {
 
 static void cmdGoto(int target) {
     char msg[64];
-    if (target == current) {
+    if (!setcodec::screenOn(syncScreenMask(), target)) {
+        cmdReply("#err screen disabled");
+    } else if (target == current) {
         snprintf(msg, sizeof(msg), "screen %d %s (already shown) #ok", target, screens[target].name);
     } else {
         gotoScreen(target, target > current ? +1 : -1);
@@ -225,12 +272,40 @@ static void cmdList() {
     for (int i = 0; i < ui::SCREEN_COUNT; i++) {
         line += ' ';
         line += i;
-        line += i == current ? '*' : ' ';
+        line += i == current ? '*' : (setcodec::screenOn(s_appliedMask, i) ? ' ' : '-');
         line += screens[i].name;
         line += i == ui::SCREEN_COUNT - 1 ? "" : ",";
     }
     line += " #ok";
     cmdReply(line.c_str());
+}
+
+static bool parseInts(const char *s, long lo, long hi, long *out, int maxN, int &n);
+
+// e [n 0|1]: enable / disable an optional screen like its Settings switch; no argument lists the mask
+static void cmdEnable(const char *arg) {
+    char msg[200];
+    if (*arg) {
+        long a[2];
+        int n;
+        if (!parseInts(arg, 0, ui::SCREEN_COUNT - 1, a, 2, n) || n != 2 || a[1] > 1) {
+            cmdReply("#err usage: e [<screen 0..10> <0|1>]");
+            return;
+        }
+        const int idx = static_cast<int>(a[0]);
+        if (setcodec::screenOn(setcodec::ALWAYS_ON, idx)) {
+            cmdReply("#err screen can't be disabled");
+            return;
+        }
+        settingsSetScreenEnabled(idx, a[1] != 0);
+        syncScreenMask();
+    }
+    int len = snprintf(msg, sizeof(msg), "screens 0x%03x:", (unsigned)s_appliedMask);
+    for (int i = 0; i < ui::SCREEN_COUNT && len > 0 && len < (int)sizeof(msg); i++)
+        len += snprintf(msg + len, sizeof(msg) - len, " %d %s=%d", i, screens[i].name,
+                        setcodec::screenOn(s_appliedMask, i) ? 1 : 0);
+    if (len > 0 && len < (int)sizeof(msg)) snprintf(msg + len, sizeof(msg) - len, " #ok");
+    cmdReply(msg);
 }
 
 static void cmdMem() {
@@ -476,13 +551,16 @@ static void handleCommand(char *line) {
             else cmdGoto(static_cast<int>(v));
             break;
         case 'n':
-            cmdGoto((current + 1) % ui::SCREEN_COUNT);
+            cmdGoto(setcodec::nextScreen(current, +1, syncScreenMask()));
             break;
         case 'p':
-            cmdGoto((current + ui::SCREEN_COUNT - 1) % ui::SCREEN_COUNT);
+            cmdGoto(setcodec::nextScreen(current, -1, syncScreenMask()));
             break;
         case 'l':
             cmdList();
+            break;
+        case 'e':
+            cmdEnable(arg);
             break;
         case 'b':
             handleBacklightCommand(sub, arg);
@@ -516,7 +594,7 @@ static void handleCommand(char *line) {
             ESP.restart();
             break;
         case 'h':
-            cmdReply("commands: s <0..10> go to screen | n next | p previous | l list | b <0-255> backlight | bf <hz> | bd <duty> | br | "
+            cmdReply("commands: s <0..10> go to screen | n next | p previous | l list (- = disabled) | e [<n> <0|1>] enable/disable screen | b <0-255> backlight | bf <hz> | bd <duty> | br | "
                      "bs [steps ms from to] | y [d|w|m|-|+] history | m memory | x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
             break;
         default:

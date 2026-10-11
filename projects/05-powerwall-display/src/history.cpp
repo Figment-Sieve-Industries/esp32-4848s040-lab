@@ -24,12 +24,16 @@ constexpr uint32_t INFO_MS = 10000;        // used/total space refresh
 constexpr uint32_t SETTINGS_SETTLE_MS = 1500; // save brightness once the slider has stopped moving
 constexpr size_t BASELINE_MAX = 512;
 
-// settings.bin: { magic, value }. "SET2" = slider percent; "SET1" (older firmware) = raw 8-bit duty of the old
-// linear slider, converted on load (backlight_curve.h). The size is unchanged, so old files still read.
+// settings.bin: { magic, brightness, reserved, screenMask } = 8 bytes (settings_codec.h). "SET3" = slider percent +
+// screen mask; "SET2" = slider percent; "SET1" (older firmware) = raw 8-bit duty of the old linear slider,
+// converted on load. The size never changed, so old files still read (their mask bytes are ignored).
 struct SettingsFile {
     uint32_t magic;
     uint8_t value;
+    uint8_t reserved;
+    uint16_t screenMask;
 };
+static_assert(sizeof(SettingsFile) == 8, "settings.bin record size must stay 8 bytes");
 
 Mutex s_lock; // static init: the getters work (defaults) before historyStart()
 bool s_started = false;
@@ -84,8 +88,9 @@ void saveSettingsIfDue() {
         if (!s_settingsDirty || millis() - s_settingsChangedMs < SETTINGS_SETTLE_MS) return;
         s_settingsDirty = false;
         memset(&f, 0, sizeof(f)); // no stray padding bytes on the card
-        f.magic = blcurve::SETTINGS_MAGIC_V2;
+        f.magic = setcodec::SETTINGS_MAGIC_V3;
         f.value = s_settings.brightnessPct;
+        f.screenMask = s_settings.screenMask;
     }
     if (!sdcard::mkdirs(DIR) || !sdcard::writeAtomic(SETTINGS_PATH, &f, sizeof(f))) {
         LockGuard g(s_lock);
@@ -277,6 +282,15 @@ void settingsSetBrightness(int pct) {
     applyBacklight(pct);
     LockGuard g(s_lock);
     s_settings.brightnessPct = static_cast<uint8_t>(pct);
+    s_settingsDirty = true;
+    s_settingsChangedMs = millis();
+}
+
+void settingsSetScreenEnabled(int screenIndex, bool on) {
+    LockGuard g(s_lock);
+    const uint16_t m = setcodec::withScreen(s_settings.screenMask, screenIndex, on);
+    if (m == s_settings.screenMask) return;
+    s_settings.screenMask = m;
     s_settingsDirty = true;
     s_settingsChangedMs = millis();
 }

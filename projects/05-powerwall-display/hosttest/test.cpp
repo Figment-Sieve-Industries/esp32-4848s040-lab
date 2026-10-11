@@ -17,6 +17,7 @@
 
 #include "../src/backlight_curve.h"
 #include "../src/day_history_calc.h"
+#include "../src/settings_codec.h"
 #include "../src/net_body.h"
 #include "../src/time_util.cpp"
 #define ENSO_HOST_TEST 1
@@ -916,6 +917,45 @@ static void testBacklightCurve() {
     CHECK(SETTINGS_MAGIC_V1 == 0x53455431 && SETTINGS_MAGIC_V2 == 0x53455432); // on-disk values must not change
 }
 
+// ---- settings_codec.h (SET1/SET2/SET3 record, screen-enable mask) -------------------------------------
+static void testSettingsCodec() {
+    using namespace setcodec;
+    Decoded d;
+    // SET3: percent + mask; always-on screens are forced on, unknown bits dropped
+    CHECK(decodeSettings(SETTINGS_MAGIC_V3, 70, 0x0008, 100, d) && d.brightnessPct == 70);
+    CHECK(d.screenMask == normalizeMask(0x0008) && screenOn(d.screenMask, 0) && screenOn(d.screenMask, 9) &&
+          screenOn(d.screenMask, 10) && !screenOn(d.screenMask, 2) && screenOn(d.screenMask, 3) && screenOn(d.screenMask, 1));
+    CHECK(decodeSettings(SETTINGS_MAGIC_V3, 100, 0xFFFF, 100, d) && d.screenMask == ALL_SCREENS);
+    CHECK(decodeSettings(SETTINGS_MAGIC_V3, 0, 0, 100, d) && d.brightnessPct == 0 && d.screenMask == ALWAYS_ON);
+    d = Decoded();
+    CHECK(!decodeSettings(SETTINGS_MAGIC_V3, 101, 0xFFFF, 100, d) && d.brightnessPct == 100); // rejected, untouched
+    // SET2 / SET1: brightness as before, every screen on whatever the mask bytes hold
+    CHECK(decodeSettings(blcurve::SETTINGS_MAGIC_V2, 55, 0, 100, d) && d.brightnessPct == 55 && d.screenMask == ALL_SCREENS);
+    CHECK(decodeSettings(blcurve::SETTINGS_MAGIC_V1, 255, 0x0003, 100, d) && d.brightnessPct == 100 &&
+          d.screenMask == ALL_SCREENS);
+    CHECK(!decodeSettings(blcurve::SETTINGS_MAGIC_V2, 101, 0, 100, d));
+    CHECK(!decodeSettings(0, 50, 0xFFFF, 100, d));
+    CHECK(!decodeSettings(0x53455434, 50, 0xFFFF, 100, d));
+    CHECK(SETTINGS_MAGIC_V3 == 0x53455433); // on-disk value must not change
+    // withScreen: optional screens toggle, always-on ones and out-of-range indexes don't
+    uint16_t m = ALL_SCREENS;
+    m = withScreen(m, 7, false);
+    CHECK(!screenOn(m, 7) && screenOn(m, 6) && m == (ALL_SCREENS & ~(1u << 7)));
+    m = withScreen(m, 7, true);
+    CHECK(m == ALL_SCREENS);
+    CHECK(withScreen(ALL_SCREENS, 0, false) == ALL_SCREENS && withScreen(ALL_SCREENS, 9, false) == ALL_SCREENS);
+    CHECK(withScreen(ALL_SCREENS, 10, false) == ALL_SCREENS && withScreen(ALL_SCREENS, 11, false) == ALL_SCREENS);
+    CHECK(withScreen(ALL_SCREENS, -1, false) == ALL_SCREENS);
+    // navigation skips disabled screens and wraps
+    uint16_t nm = ALL_SCREENS;
+    for (int i = 2; i <= 8; i++) nm = withScreen(nm, i, false); // only house, today, settings, about left
+    CHECK(nextScreen(1, +1, nm) == 9 && nextScreen(9, +1, nm) == 10 && nextScreen(10, +1, nm) == 0);
+    CHECK(nextScreen(0, -1, nm) == 10 && nextScreen(9, -1, nm) == 1 && nextScreen(1, -1, nm) == 0);
+    CHECK(nextScreen(4, +1, nm) == 9 && nextScreen(4, -1, nm) == 1); // from a screen that has just been disabled
+    CHECK(nextScreen(1, +1, ALL_SCREENS) == 2 && nextScreen(10, +1, ALL_SCREENS) == 0 && nextScreen(0, -1, ALL_SCREENS) == 10);
+    CHECK(nextScreen(2, +1, withScreen(ALL_SCREENS, 3, false)) == 4);
+}
+
 // ---- day_history_calc.h ---------------------------------------------------------------------------------
 static void testDayHistoryCalc() {
     using namespace dayhist::calc;
@@ -1081,6 +1121,7 @@ int main(int argc, char **argv) {
     testCacheHelpers();
     testCacheIo();
     testBacklightCurve();
+    testSettingsCodec();
     testDayHistoryCalc();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;

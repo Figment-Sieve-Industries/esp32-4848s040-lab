@@ -28,6 +28,8 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <atomic>
+#include <string.h>
 #include <WiFiMulti.h>
 #include <esp_heap_caps.h>
 #include <mbedtls/platform.h>
@@ -404,6 +406,8 @@ struct JobState {
     uint32_t retryMs = 0;  // current back-off step (backoff jobs)
 };
 JobState s_jobs[JOB_COUNT];
+static_assert(JOB_COUNT <= 32, "job enable mask is one 32-bit word");
+std::atomic<uint32_t> s_jobOff{0}; // bit i set = JOBS[i] disabled (netSetJobEnabled)
 
 // Runs a TLS job with the gateway's session closed first (one TLS session at a time), logging the
 // internal-RAM low-water mark it reached.
@@ -423,6 +427,7 @@ void runOneJob() {
         const JobDef &j = JOBS[i];
         JobState &st = s_jobs[i];
         if ((int32_t)(now - st.next) < 0) continue;
+        if (s_jobOff.load(std::memory_order_relaxed) & (1u << i)) continue; // switched off in Settings
         if (j.needed && !j.needed()) continue;
         const bool ok = j.tls ? runTls(j) : j.fn();
         uint32_t wait = ok ? j.okMs : j.retryMs;
@@ -599,3 +604,13 @@ WeatherData weatherData() { return s_weather.get(); }
 NetStatus networkStatus() { return s_net.get(); }
 
 uint32_t netTaskStackFree() { return s_netTask ? uxTaskGetStackHighWaterMark(s_netTask) : 0; }
+
+bool netSetJobEnabled(const char *name, bool on) {
+    for (size_t i = 0; i < JOB_COUNT; i++) {
+        if (strcmp(JOBS[i].name, name) != 0) continue;
+        if (on) s_jobOff.fetch_and(~(1u << i));
+        else s_jobOff.fetch_or(1u << i);
+        return true;
+    }
+    return false;
+}

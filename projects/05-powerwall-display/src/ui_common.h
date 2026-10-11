@@ -2,6 +2,7 @@
 // Shared look and helpers for all screens (480x480, rotated so USB-C is at the bottom).
 #include <lvgl.h>
 #include <stddef.h>
+#include <stdint.h>
 
 namespace ui {
 
@@ -58,6 +59,9 @@ void topBarUpdate(TopBar &tb);
 
 // Page indicator centred at y = 456: active page is a 20x8 pill (TEXT), others 8x8 dots (TRACK).
 void pageDots(lv_obj_t *scr, int activeIndex);
+// Shows the dots of the enabled screens only (bit per ScreenIndex, settings_codec.h); the row re-centres.
+// Cheap: does nothing unless the mask changed. Pages created later pick the current mask up.
+void setScreenMask(uint16_t mask);
 
 // Animations (all LVGL-cheap; deleted automatically with the object)
 void animPulse(lv_obj_t *obj, uint32_t periodMs);            // bg opacity 255 <-> 90, forever
