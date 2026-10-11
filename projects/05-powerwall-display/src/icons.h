@@ -14,9 +14,6 @@ lv_obj_t *iconCreate(lv_obj_t *parent, Icon icon, int size, lv_color_t color, fl
 // Replace an icon container's drawing (used for the weather icon).
 void iconSet(lv_obj_t *container, Icon icon, lv_color_t color, float stroke = 2.0f);
 
-// Battery icon only: set the inner fill level 0..100.
-void iconSetBatteryLevel(lv_obj_t *container, float pct);
-
 // Gentle looping motion for a weather icon: clouds drift, rain/snow falls, sun breathes.
 // Call after iconCreate/iconSet (iconSet restarts it).
 void iconAnimate(lv_obj_t *container, Icon icon);

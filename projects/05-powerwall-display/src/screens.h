@@ -5,18 +5,18 @@
 // refresh() updates it from the latest data (called every 500 ms while it is the active
 // screen, and once right before it is shown); onShow() replays entry animations.
 
-lv_obj_t *houseCreate();   // B: power flow
+lv_obj_t *houseCreate();   // power flow (design M, values in pills)
 void houseRefresh();
 
-lv_obj_t *todayCreate();   // G: today's energy
+lv_obj_t *todayCreate();   // today's energy
 void todayRefresh();
 void todayOnShow();
 
-lv_obj_t *healthCreate();  // H: battery & grid
+lv_obj_t *healthCreate();  // battery & grid
 void healthRefresh();
 void healthOnShow();
 
-lv_obj_t *weatherCreate(); // I: weather & lifetime
+lv_obj_t *weatherCreate(); // weather & lifetime
 void weatherRefresh();
 void weatherOnShow();
 
@@ -28,11 +28,11 @@ lv_obj_t *auroraCreate();   // aurora (UK): AuroraWatch level, 24 h activity, Kp
 void auroraRefresh();
 void auroraOnShow();
 
-lv_obj_t *sunCreate();      // sun (R): SOHO photo, flare class/odds, R/S/G scales, solar wind, sunspots
+lv_obj_t *sunCreate();      // sun: SOHO photo, flare class/odds, R/S/G scales, solar wind, sunspots
 void sunRefresh();
 void sunOnShow();
 
-lv_obj_t *ensoCreate();     // El Nino (S): CPC alert, weekly Nino 3.4, ONI/RONI, monthly history, odds
+lv_obj_t *ensoCreate();     // El Nino: CPC alert, weekly Nino 3.4, ONI/RONI, monthly history, odds
 void ensoRefresh();
 void ensoOnShow();
 

@@ -4,12 +4,13 @@
 #include <Arduino.h>
 #include <src/core/lv_global.h> // private: anim list access for pauseScreenAnimations
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 // Navigation hooks, implemented in main.cpp
 void navSwipe(int direction); // +1 = next screen, -1 = previous
-void navTap();
 
 namespace ui {
 
@@ -28,21 +29,30 @@ const lv_color_t C_ALERT_BG = lv_color_hex(0x2A1215);
 const lv_color_t C_WEATHER = lv_color_hex(0xC9D1D9);
 const lv_color_t C_OK_BG = lv_color_hex(0x1F3A2B);
 
+// Named colours the screens used as literals (values unchanged)
+const lv_color_t C_RED = lv_color_hex(0xE5484D); // = C_ALERT
+const lv_color_t C_ORANGE = lv_color_hex(0xFF8A3D);
+const lv_color_t C_YELLOW = lv_color_hex(0xF5D400);
+const lv_color_t C_GREEN = lv_color_hex(0x3DDC84); // = C_BATT
+const lv_color_t C_BLUE = lv_color_hex(0x3B82F6);
+const lv_color_t C_PURPLE = lv_color_hex(0xB266FF);
+const lv_color_t DIM_BAR = lv_color_hex(0x3A4654);
+
 namespace {
 
-uint32_t lastGestureMs = 0;
+// Extra delay added to every entry animation started while a screen slides in (see setShowDelay)
+uint32_t s_showDelayMs = 0;
+
+// Top bars made by screenCreate(index), updated centrally by main
+TopBar s_bars[SCREEN_COUNT];
+bool s_haveBar[SCREEN_COUNT];
 
 void gestureCb(lv_event_t *) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
     if (dir == LV_DIR_LEFT) navSwipe(+1);
     else if (dir == LV_DIR_RIGHT) navSwipe(-1);
     else return;
-    lastGestureMs = millis();
     lv_indev_wait_release(lv_indev_active());
-}
-
-void clickCb(lv_event_t *) {
-    if (millis() - lastGestureMs > 400) navTap(); // a swipe also ends in a release; ignore that
 }
 
 void opaBg(void *o, int32_t v) { lv_obj_set_style_bg_opa((lv_obj_t *)o, (lv_opa_t)v, 0); }
@@ -71,7 +81,6 @@ lv_obj_t *screenCreate() {
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(scr, gestureCb, LV_EVENT_GESTURE, nullptr);
-    lv_obj_add_event_cb(scr, clickCb, LV_EVENT_CLICKED, nullptr);
     return scr;
 }
 
@@ -215,7 +224,11 @@ void animFadeIn(lv_obj_t *obj, uint32_t delayMs) {
     animValue(obj, opaObj, LV_OPA_TRANSP, LV_OPA_COVER, 400, delayMs);
 }
 
+void setShowDelay(uint32_t ms) { s_showDelayMs = ms; }
+uint32_t showDelay() { return s_showDelayMs; }
+
 void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint32_t ms, uint32_t delayMs) {
+    delayMs += s_showDelayMs; // while a screen slides in, start after the slide
     lv_anim_t an;
     lv_anim_init(&an);
     lv_anim_set_var(&an, var);
@@ -230,30 +243,210 @@ void animValue(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint3
 
 namespace {
 
-// Pause/resume every animation whose var is `obj`. LVGL 9.5 has no public way to enumerate
-// animations (lv_anim_get returns only the first match), so walk the internal list.
-void pauseObjAnims(lv_obj_t *obj, bool pause) {
+} // namespace
+
+void pauseScreenAnimations(lv_obj_t *screen, bool pause) {
+    if (!screen) return;
+    // One pass over LVGL's animation list (it has no public enumeration; lv_anim_get returns only the
+    // first match). Every animation in this app has an lv_obj as its var (no lv_bar/lv_slider
+    // animations, whose var is a struct), so the owning screen is found from the var.
+    // Animations on the screen object itself are LVGL's slide transitions: never frozen (e.g. swiping
+    // again while a slide is still running).
     lv_ll_t *ll = &LV_GLOBAL_DEFAULT()->anim_state.anim_ll;
-    for (auto *a = (lv_anim_t *)lv_ll_get_head(ll); a; a = (lv_anim_t *)lv_ll_get_next(ll, a)) {
-        if (a->var != obj) continue;
+    for (auto *a = static_cast<lv_anim_t *>(lv_ll_get_head(ll)); a; a = static_cast<lv_anim_t *>(lv_ll_get_next(ll, a))) {
+        auto *o = static_cast<lv_obj_t *>(a->var);
+        if (!o || o == screen || lv_obj_get_screen(o) != screen) continue;
         if (pause) {
             if (!lv_anim_is_paused(a)) lv_anim_pause(a);
         } else if (lv_anim_is_paused(a)) {
             lv_anim_resume(a);
         }
     }
-    uint32_t n = lv_obj_get_child_count(obj);
-    for (uint32_t i = 0; i < n; i++) pauseObjAnims(lv_obj_get_child(obj, i), pause);
 }
 
-} // namespace
+// ---------------- shared helpers (consolidation round) ----------------
 
-void pauseScreenAnimations(lv_obj_t *screen, bool pause) {
-    if (!screen) return;
-    // Children only: animations on the screen object itself are LVGL's slide transitions, which
-    // must never be frozen (e.g. swiping again while a slide is still running).
-    uint32_t n = lv_obj_get_child_count(screen);
-    for (uint32_t i = 0; i < n; i++) pauseObjAnims(lv_obj_get_child(screen, i), pause);
+lv_color_t levelColor(int level) {
+    if (level <= 0) return C_GREEN;
+    if (level == 1) return C_YELLOW;
+    if (level == 2) return C_ORANGE;
+    return C_RED;
+}
+
+void inert(lv_obj_t *o) {
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+lv_obj_t *rect(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t bg, int radius) {
+    lv_obj_t *o = box(parent); // style-less, inert
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_bg_color(o, bg, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
+}
+
+lv_obj_t *flex(lv_obj_t *parent, lv_flex_flow_t flow, int gap, lv_flex_align_t main, lv_flex_align_t cross) {
+    lv_obj_t *o = box(parent);
+    lv_obj_set_flex_flow(o, flow);
+    lv_obj_set_flex_align(o, main, cross, cross);
+    lv_obj_set_style_pad_row(o, gap, 0);
+    lv_obj_set_style_pad_column(o, gap, 0);
+    return o;
+}
+
+lv_obj_t *valueUnit(lv_obj_t *parent, const lv_font_t *vf, const lv_font_t *uf, lv_obj_t **value, lv_obj_t **unit,
+                    int unitPadBottom) {
+    lv_obj_t *row = flex(parent, LV_FLEX_FLOW_ROW, 4, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END);
+    lv_obj_t *v = label(row, vf, TEXT, "--");
+    lv_obj_t *u = label(row, uf, MUTED, "");
+    lv_obj_set_style_pad_bottom(u, unitPadBottom, 0);
+    if (value) *value = v;
+    if (unit) *unit = u;
+    return row;
+}
+
+lv_obj_t *labelAt(lv_obj_t *parent, const lv_font_t *f, lv_color_t c, const char *t, int x, int y, int w,
+                  lv_text_align_t align) {
+    lv_obj_t *l = label(parent, f, c, t);
+    if (w > 0) {
+        lv_obj_set_width(l, w);
+        lv_obj_set_style_text_align(l, align, 0);
+    }
+    lv_obj_set_pos(l, x, y);
+    return l;
+}
+
+lv_obj_t *cardCaption(lv_obj_t *card, const char *text, int x, int y) {
+    lv_obj_t *l = caption(card, MUTED, text);
+    lv_obj_set_pos(l, x, y);
+    return l;
+}
+
+HBar hbar(lv_obj_t *parent, int x, int y, int w, int h, lv_color_t track, lv_color_t fill, int radius) {
+    HBar b;
+    b.w = w;
+    b.track = rect(parent, x, y, w, h, track, radius);
+    b.fill = rect(b.track, 0, 0, 0, h, fill, radius);
+    lv_obj_add_flag(b.fill, LV_OBJ_FLAG_HIDDEN);
+    return b;
+}
+
+void hbarSet(HBar &b, float frac, lv_color_t fill) {
+    if (!b.fill) return;
+    if (!(frac > 0.0f)) { // also catches NaN
+        setHidden(b.fill, true);
+        return;
+    }
+    if (frac > 1.0f) frac = 1.0f;
+    int w = static_cast<int>(lroundf(frac * static_cast<float>(b.w)));
+    if (w < 1) w = 1;
+    setWidth(b.fill, w);
+    setBgColor(b.fill, fill);
+    setHidden(b.fill, false);
+}
+
+void setTextF(lv_obj_t *l, const char *fmt, ...) {
+    char buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    setText(l, buf);
+}
+
+void setValueF(lv_obj_t *l, bool have, bool stale, lv_color_t ok, const char *fmt, ...) {
+    if (!have) {
+        setText(l, "--");
+        setTextColor(l, MUTED);
+        return;
+    }
+    char buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    setText(l, buf);
+    setTextColor(l, stale ? MUTED : ok);
+}
+
+void formatKWh(char *buf, size_t n, double kwh, bool withUnit) {
+    char num[16];
+    formatKWh(num, sizeof(num), kwh);
+    snprintf(buf, n, withUnit ? "%s kWh" : "%s", num);
+}
+
+void fadeIn(lv_obj_t *const *objs, int n, uint32_t firstDelayMs, uint32_t stepMs) {
+    for (int i = 0; i < n; i++)
+        if (objs[i]) animFadeIn(objs[i], firstDelayMs + static_cast<uint32_t>(i) * stepMs);
+}
+
+// ---- Banner ----
+
+Banner bannerCreate(lv_obj_t *scr, int y, int h, const char *cap, int subW) {
+    Banner b;
+    b.card = card(scr, 24, y, 432, h);
+    lv_obj_set_style_border_width(b.card, 2, 0);
+    lv_obj_set_style_border_color(b.card, MUTED, 0);
+
+    b.ring = box(b.card);
+    lv_obj_set_size(b.ring, 36, 36);
+    lv_obj_set_pos(b.ring, 12, (h - 40) / 2 - 1);
+    lv_obj_set_style_radius(b.ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(b.ring, 2, 0);
+    lv_obj_set_style_border_color(b.ring, MUTED, 0);
+
+    b.cap = caption(b.card, MUTED, cap);
+    b.name = label(b.card, &lv_font_montserrat_20, MUTED, "--");
+    lv_obj_set_width(b.name, subW);
+    lv_label_set_long_mode(b.name, LV_LABEL_LONG_MODE_CLIP);
+    b.sub = label(b.card, &lv_font_montserrat_12, MUTED, "");
+    lv_obj_set_width(b.sub, subW);
+    lv_label_set_long_mode(b.sub, LV_LABEL_LONG_MODE_CLIP);
+    lv_obj_set_pos(b.cap, 60, 9);
+    lv_obj_set_pos(b.name, 60, 25);
+    lv_obj_set_pos(b.sub, 60, h - 28);
+    return b;
+}
+
+void bannerSet(Banner &b, lv_color_t fg, lv_color_t bg, const char *name, bool dim, const char *sub, size_t bigMaxLen,
+               const lv_font_t *big, const lv_font_t *small) {
+    setBgColor(b.card, bg);
+    if (!lv_color_eq(lv_obj_get_style_border_color(b.card, LV_PART_MAIN), fg))
+        lv_obj_set_style_border_color(b.card, fg, 0);
+    if (!lv_color_eq(lv_obj_get_style_border_color(b.ring, LV_PART_MAIN), fg))
+        lv_obj_set_style_border_color(b.ring, fg, 0);
+    setTextColor(b.cap, fg);
+
+    // Caption and name sit higher for a taller name font (tuned so the 20 px and 26 px fonts reproduce
+    // the original aurora and ENSO banners: caption y 9 / 6, name y 25 / 20).
+    int dl = static_cast<int>(lv_font_get_line_height(big)) - 23;
+    lv_obj_set_y(b.cap, 9 - dl * 3 / 7); // change-only inside LVGL
+    lv_obj_set_y(b.name, 25 - dl * 5 / 7);
+
+    const lv_font_t *f = strlen(name) > bigMaxLen ? small : big;
+    if (lv_obj_get_style_text_font(b.name, LV_PART_MAIN) != f) lv_obj_set_style_text_font(b.name, f, 0);
+    setTextColor(b.name, dim ? MUTED : TEXT);
+    setText(b.name, name);
+    setText(b.sub, sub ? sub : "");
+}
+
+// ---- screen registry ----
+
+lv_obj_t *screenCreate(int index) {
+    lv_obj_t *scr = screenCreate();
+    if (index >= 0 && index < SCREEN_COUNT) {
+        s_bars[index] = topBarCreate(scr);
+        s_haveBar[index] = true;
+    }
+    pageDots(scr, index);
+    return scr;
+}
+
+void topBarUpdateFor(int index) {
+    if (index >= 0 && index < SCREEN_COUNT && s_haveBar[index]) topBarUpdate(s_bars[index]);
 }
 
 } // namespace ui

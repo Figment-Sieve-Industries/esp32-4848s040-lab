@@ -52,6 +52,22 @@
 
 Code: `screen_house.cpp`, `screen_today.cpp`, `screen_health.cpp`, `screen_weather.cpp`. Shared look and helpers: `ui_common.*`. Icons: `icons.*`.
 
+## Serial commands
+Type a line in the serial monitor (115200 baud, the CH340C console) to drive the UI without touching it. Each command gets one reply line ending in `#ok` or `#err <reason>`. Commands are read without blocking, so the display keeps running.
+
+| Command | Does |
+|---|---|
+| `s <n>` | Go to screen `n` (0..9) the way a swipe does: data refresh, slide, entry animations. Asking for the screen already shown just replies `#ok` |
+| `n` / `p` | Next / previous screen (wraps) |
+| `l` | List the screens, the current one marked `*` |
+| `b <0-255>` | Set the backlight now. Not saved, and the panel driver cuts out below about 100 |
+| `m` | Print the memory / heap line (internal free, largest block, stacks, LVGL pool, PSRAM) |
+| `h` | Help |
+
+Entry animations (fades, bar grow) start after the 300 ms slide, not on top of it. Build with `-DUI_FADE_AFTER_SLIDE=0` to start them immediately as before.
+
+The 10 s heartbeat also prints `redraw: <n> px/s, <n> flushes/s` (invalidated pixels and display flushes per second), the number to compare when changing idle animations.
+
 ## No flash wear
 - Nothing is written to flash at runtime.
 - **"Today" totals** come from the Powerwall's lifetime counters minus a midnight snapshot. The snapshot is kept in **RTC memory** (`RTC_NOINIT_ATTR`, `energy.cpp`). It survives software restarts and crashes, but not a power cut, the reset button or a reflash; the `EN` reset reports as power-on.
