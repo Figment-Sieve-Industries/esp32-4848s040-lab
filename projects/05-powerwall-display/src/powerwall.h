@@ -26,11 +26,12 @@ constexpr uint32_t PW_JOB_BUDGET_MS = 12000;
 static_assert(PW_JOB_BUDGET_MS + 2000 /*poll*/ + 3000 /*overrun + reconnect*/ <= PW_STALE_MS,
               "a background job must not make the live data stale");
 
-// 1: keep the gateway's TLS connection open across polls (HTTP/1.1 keep-alive for /aggregates, bodies
-// de-chunked by net::readBody), so there is no handshake every 2 s. 0 (default until soak-tested):
-// /aggregates is HTTP/1.0 and closes the connection, one handshake per poll.
+// 1 (default): keep the gateway's TLS connection open across polls (HTTP/1.1 keep-alive for /aggregates,
+// bodies de-chunked by net::readBody). Soak 2026-10-11, 10 min: 22 TLS connects instead of 275, gateway
+// handshake refusals 1 instead of 19, main screen 59 fps instead of ~40; costs ~10 KB of internal RAM
+// while the session is held (min free 105 KB). 0: /aggregates is HTTP/1.0, one handshake per poll.
 #ifndef PW_GW_KEEPALIVE
-#define PW_GW_KEEPALIVE 0
+#define PW_GW_KEEPALIVE 1
 #endif
 
 // Weather older than this is treated as stale by the UI ("--" / dimmed).

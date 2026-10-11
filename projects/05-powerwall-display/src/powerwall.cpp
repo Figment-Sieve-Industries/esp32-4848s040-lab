@@ -45,8 +45,8 @@ constexpr size_t GW_BUF = 16 * 1024;        // gateway bodies (aggregates is the
 constexpr size_t WEATHER_BUF = 16 * 1024;   // Open-Meteo body is ~3 KB
 constexpr uint32_t MIN = 60 * 1000UL;
 constexpr const char *WEATHER_REC = "weather"; // SD cache record name (cache.h)
-// After boot, wait at most this long (from the network task's start) for the SD card's first mount and
-// for the clock before restoring the cache
+// After boot, wait at most this long (from the network task's start) for the SD card's first mount
+// before restoring the cache anyway (no card: nothing to restore)
 constexpr uint32_t RESTORE_WAIT_MS = 20000;
 
 WiFiMulti s_wifiMulti;
@@ -433,9 +433,9 @@ void runOneJob() {
 
 // ---- SD cache restore ---------------------------------------------------------------------------
 // Once after boot, before any job runs: the cached records fill the screens, and a job whose data is
-// still inside its refresh window is pushed back to when that window ends. Ages need the clock: without
-// it (internet down) the records are restored after RESTORE_WAIT_MS anyway, shown as fresh, and
-// restored once more when the clock is set, which then schedules the jobs.
+// still inside its refresh window is pushed back to when that window ends. Restored as soon as the SD
+// card has mounted; ages need the clock, so until it is set the records show as fresh, and they are
+// restored once more when it is set, which then schedules the jobs.
 enum class Restore : uint8_t { Pending, NoClock, Done };
 Restore s_restore = Restore::Pending;
 uint32_t s_taskStartMs;
@@ -491,16 +491,19 @@ int restoreCache(bool clockOk) {
     return restored;
 }
 
-// Called every pass: restores the cache once the boot-time SD mount is done and the clock is set, each
-// waited for at most RESTORE_WAIT_MS from the task's start. Jobs run only after this (s_restore Done).
+// Called every pass: restores the cache once the boot-time SD mount is done (waited for at most
+// RESTORE_WAIT_MS), and again once the clock is set. Jobs run only after that (s_restore Done).
 void restorePass() {
     if (s_restore == Restore::Done) return;
     const bool clockOk = tu::clockValid();
     if (s_restore == Restore::NoClock) {
         if (!clockOk) return;
     } else {
+        // Don't wait for the clock: show the records now (as fresh) and fix the ages once it is set.
+        // An ESP.restart() comes back through an RTC watchdog reset here, which clears the clock, so
+        // waiting for NTP left the screens empty for ~20 s after every reboot.
         const bool waited = millis() - s_taskStartMs >= RESTORE_WAIT_MS;
-        if (!waited && (!clockOk || !historyStatus().firstMountDone)) return;
+        if (!waited && !historyStatus().firstMountDone) return;
     }
     const int restored = restoreCache(clockOk);
     // Restored without the clock: restore again once it is set, for the ages and the schedule
@@ -511,6 +514,9 @@ void netTask(void *) {
     s_gwClient.setInsecure(); // the gateway uses a self-signed certificate (LAN only)
     s_gwClient.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
     s_taskStartMs = millis();
+    // The first Wi-Fi connect blocks for seconds: give the SD task its boot mount (~1.5 s) first, so
+    // the cache restore below fills the screens straight away
+    while (!historyStatus().firstMountDone && millis() - s_taskStartMs < 3000) vTaskDelay(pdMS_TO_TICKS(50));
     for (;;) {
         restorePass(); // before the Wi-Fi check: the cache fills the screens without a network too
         if (s_wifiMulti.run(10000) != WL_CONNECTED) {

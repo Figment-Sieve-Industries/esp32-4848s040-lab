@@ -20,6 +20,7 @@
 //   m          print the memory / heap line now
 //   x          screenshot: framebuffer as "#px" base64 lines at 921600 baud (tools-dev/screendump.py)
 //   v <0|1>    privacy mode for screenshots: placeholder Wi-Fi name and town (not saved)
+//   c          list the SD cache records (name, size, version, age)
 //   r          reboot (ESP.restart; RTC data and the system clock survive)
 //   h          help
 #include <Arduino.h>
@@ -29,6 +30,7 @@
 #include <mbedtls/base64.h>
 #include <stdlib.h>
 #include <string.h>
+#include "cache.h"
 #include "energy.h"
 #include "history.h"
 #include "net_http.h"
@@ -317,6 +319,10 @@ static void handleCommand(char *line) {
                 cmdReply(v ? "privacy on #ok" : "privacy off #ok");
             }
             break;
+        case 'c':
+            cache::printStatus();
+            cmdReply("cache #ok");
+            break;
         case 'r':
             cmdReply("rebooting #ok");
             Serial.flush();
@@ -325,7 +331,7 @@ static void handleCommand(char *line) {
             break;
         case 'h':
             cmdReply("commands: s <0..9> go to screen | n next | p previous | l list | b <0-255> backlight | m memory | "
-                     "x screenshot | v <0|1> privacy | r reboot | h help #ok");
+                     "x screenshot | v <0|1> privacy | c cache | r reboot | h help #ok");
             break;
         default:
             cmdReply("#err unknown command (h for help)");
