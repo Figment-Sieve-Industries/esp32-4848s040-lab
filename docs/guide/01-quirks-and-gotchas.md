@@ -71,6 +71,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-SD-05](#q-sd-05) | Harmless "no token received" warning on every mount | D | Arduino-ESP32 SD |
 | [Q-SD-06](#q-sd-06) | Filesystem constraints and power-cut-safe writes | W | Any FatFs on SD |
 | [Q-SD-07](#q-sd-07) | Inserting a card can drop the PC's USB-serial link | O | This board + CH340 |
+| [Q-SD-08](#q-sd-08) | `writeAtomic` / `readAtomic` are capped at 4 KB | D | `SdStore` users |
 
 ### MEM: memory
 
@@ -421,6 +422,14 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Fix:** Re-open the port. `sd_serial.py` and the capture scripts tolerate a dropped port.
 - **Evidence:** [hardware-log](../hardware-log.md) hot-swap row; soak interrupted 2026-10-11.
 - **Status:** open. **Applies to:** this board with a CH340 and a PC.
+
+<a id="q-sd-08"></a>
+### Q-SD-08 `writeAtomic` / `readAtomic` are capped at 4 KB
+- **Symptom:** `sdcard::writeAtomic()` and `readAtomic()` return `Res::No` for a payload larger than 4096 bytes, with no other diagnostic. It showed up when sizing the per-month history file for the history screen (13,888 bytes).
+- **Root cause:** `ATOMIC_MAX = 4096` in `common/lib/SdStore/src/sd_store.cpp`. Both calls allocate fixed 4 KB scratch buffers (one for the write, two to compare copies on read) and reject anything longer, which keeps their heap use small and predictable. The limit is documented as "up to 4 KB" in ADR-31 but is easy to miss in the header.
+- **Fix:** For bigger files do the same sequence by hand, as `projects/05-powerwall-display/src/day_history.cpp` does: write `path.tmp` whole, then remove `path` and rename. A cut between the remove and the rename leaves a complete `.tmp`, so the reader must try `path.tmp` when `path` is missing or bad. Give the data its own CRC (the month files have one per slot). See [ADR-35](04-patterns-and-decisions.md#adr-35-day-history-month-files-with-fixed-slots-and-per-slot-crc). Or split the state into records of 4 KB or less.
+- **Evidence:** `sd_store.cpp` (`ATOMIC_MAX`, the `len > ATOMIC_MAX` checks in both calls). The hand-written path is the one in the day-history code (not yet exercised by a card-level power-cut test; unverified).
+- **Status:** documented. **Applies to:** `SdStore` users.
 
 ---
 

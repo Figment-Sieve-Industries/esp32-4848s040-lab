@@ -10,7 +10,7 @@ This is the single list of projects; the root README links here. Each project is
 | 02 | [02-lvgl-hello](02-lvgl-hello/) | works on hw | LVGL 9.5 base: button, backlight slider, FPS monitor. **Copy this for UI projects.** |
 | 03 | [03-lvgl-demos](03-lvgl-demos/) | works on hw | Touch launcher for LVGL's official demos: Widgets, Music (square), Benchmark, Stress. Benchmark results are in the [hardware log](../docs/hardware-log.md). |
 | 04 | [04-lvgl-fb2-bench](04-lvgl-fb2-bench/) | works on hw | Experiment: double framebuffers + vsync swap. Works, but measured slower (20 vs 35 FPS). See the hardware log. |
-| 05 | [05-powerwall-display](05-powerwall-display/) | works on hw | **Tesla Powerwall 3 display** from the gateway's local LAN API (keep-alive HTTPS). Ten swipeable screens: power flow, today, battery & grid, weather, moon, aurora (UK), sun & space weather, El Nino, settings (brightness, SD status), about. SD minute log, power-cut-safe today totals, SD cache of fetched data (screens fill ~2 s after boot). Serial test commands and screenshots. No internal-flash writes at runtime. Needs `src/secrets.h`. |
+| 05 | [05-powerwall-display](05-powerwall-display/) | works on hw | **Tesla Powerwall 3 display** from the gateway's local LAN API (keep-alive HTTPS). Eleven swipeable screens: power flow, today, history (day / week / month), battery & grid, weather, moon, aurora (UK), sun & space weather, El Nino, settings (brightness, SD status), about. SD minute log, power-cut-safe today totals, SD cache of fetched data (screens fill ~2 s after boot). Serial test commands and screenshots. No internal-flash writes at runtime. Needs `src/secrets.h`. |
 | 06 | [06-sd-card-test](06-sd-card-test/) | works on hw | microSD bring-up and the shared SD code (`common/lib/SdStore`, patched `common/lib/SD`): mount, card registers, 19 functional tests, clock sweep, soak, hot-swap. Fully drivable over serial (`sd_serial.py`). |
 
 Status values: `idea` → `wip` → `builds` → `works on hw` → `done`. "builds" means it compiles; it has **not** been run on a board yet.
@@ -26,7 +26,6 @@ Numbers are assigned when a project starts.
 | LVGL performance, round 2 | Done so far: `-O2`, IRAM, 120-line buffer (35 FPS); double FB and 2 draw threads were slower. Next: async DMA flush (`esp_async_memcpy`) with 2 draw buffers to hide the 20 ms copy, then esp_lvgl_port SIMD blend. |
 | 05: long soak | Several hours with gateway keep-alive + the mbedTLS 4 KB PSRAM threshold, to check leaks, heap fragmentation and reconnects. |
 | 05: OTA updates | Before wall-mounting (the USB port will be hard to reach). Related: the `wifi-ota` idea above. |
-| 05: history charts | Day / week / month charts from the SD minute log. |
 | 05: VPP test toggle | A way to exercise the VPP-active display state without a real event. |
 | 05: TEDAPI (optional) | Backup reserve and operation mode, which the customer-login local API does not expose. |
 | 05: main-screen redraw load | Wi-Fi label throttle done (2026-10-11: the label is in 4 of 36 slow frames in a 10-min soak). The remaining ~150 ms frames are ~80 small areas: power-flow labels plus the moving chevrons (each invalidated twice), worst when all four flows are active. Options: fewer chevron invalidations, label updates spread over frames. See guide 03 `inv-stutter-rotated-flush`. |

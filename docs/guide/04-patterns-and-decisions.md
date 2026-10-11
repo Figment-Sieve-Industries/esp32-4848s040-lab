@@ -60,6 +60,7 @@ Status words follow the repo vocabulary (`idea` / `wip` / `builds` / `works on h
 | [32](#adr-32-hot-swap-by-polling) | Hot-swap by polling | Storage |
 | [33](#adr-33-a-patched-sd-library) | A patched SD library | Storage |
 | [34](#adr-34-sd-cache-of-fetched-data) | SD cache of fetched data | Storage |
+| [35](#adr-35-day-history-month-files-with-fixed-slots-and-per-slot-crc) | Day history: month files with fixed slots and per-slot CRC | Storage |
 
 Sections after the ADRs cover [UI conventions](#ui-conventions), [code conventions](#code-conventions), [repository layout](#repository-and-project-layout) and [open points](#open-points).
 
@@ -358,6 +359,14 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 - **Alternatives.** Cache in RTC memory: lost on power cut. Cache on internal flash: ADR-28.
 - **Consequences.** Status: **the pure helpers and the contract are in the tree; `cache.cpp` (the card I/O) is not there yet**, so the data is not cached today. Treat this as `wip`. Version numbers must be bumped when a cached struct changes meaning.
 - **Evidence.** `projects/05-powerwall-display/src/cache.h`.
+
+### ADR-35: Day history: month files with fixed slots and per-slot CRC
+
+- **Context.** The history screen (day, week, month charts) needs hourly energy for today and daily totals plus hourly bins for past days, kept for months, with no internal-flash writes (ADR-28) and no card access from the UI thread (ADR-32). The Powerwall's local API only gives lifetime counters, so the history has to be built on the device.
+- **Decision.** `day_history.cpp` turns changes in the gateway's lifetime counters into hourly bins of today's `DayRecord` (448 bytes: date, flags, day totals, 24 hourly solar, home, import and export values, and the battery percentage at the end of each hour, with a CRC). Today's record lives in RTC memory, so the UI reads it live. The SD task saves it every 10 minutes, on the hour and at midnight into `/powerwall/days/YYYY-MM.bin`: 31 fixed slots (slot = day of month minus 1, 13,888 bytes, no header), each with its own CRC, so one bad slot costs one day. The file is replaced by writing `.tmp` whole, then remove and rename, because `writeAtomic` is capped at 4 KB ([Q-SD-08](01-quirks-and-gotchas.md#q-sd-08)); a cut in between leaves a complete `.tmp` that the reader uses. The SD task also reads month files into a three-month PSRAM cache. The UI asks for a mode and period and copies a `View`; a sequence number in the view lets the screen skip redrawing unless something changed. The UI never waits on the card and shows "loading" or empty bars while a past month is being read.
+- **Alternatives.** One CSV per day re-read for each chart: a month view would parse up to about 45,000 minute rows for every swipe, and the minute log is for inspection, not charts. One small file per day: 365 files a year, slow directory scans on FAT and a `writeAtomic` call each. Rewriting the whole history file each time: write amplification and one CRC for everything. NVS or other internal flash: ruled out by ADR-28 (repeated writes). RTC memory alone: lost on a power cut, and too small for months.
+- **Consequences.** Fixed slots make a read or an update a seek, and a month file is about 14 KB, so a save is one short write. Changing the `DayRecord` layout needs a new magic (now `DAY1`); old records are then ignored. A day the device was off, or where totals start after midnight (power cut or first boot), is flagged partial and shown as such. With no card only today is available. DST: the repeated hour adds into one bin.
+- **Evidence.** `projects/05-powerwall-display/src/day_history.h`, `day_history.cpp` (header comment), `day_history_calc.h` (pure logic, host-tested), `screen_history.cpp`. No power-cut or long-soak measurements recorded yet; status `builds` for the save path until the maintainer reports otherwise.
 
 ---
 

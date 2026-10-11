@@ -6,22 +6,27 @@ A live **Tesla Powerwall 3** energy monitor on the Guition ESP32-4848S040's 4" 4
 
 <table>
   <tr>
-    <td align="center"><img src="../../docs/images/screens/05-0-house.png" width="240" alt="Power flow screen"><br>1 Power flow</td>
-    <td align="center"><img src="../../docs/images/screens/05-1-today.png" width="240" alt="Today screen"><br>2 Today</td>
-    <td align="center"><img src="../../docs/images/screens/05-2-health.png" width="240" alt="Battery and grid screen"><br>3 Battery and grid</td>
+    <td align="center"><img src="../../docs/images/screens/05-0-house.png" width="240" alt="Power flow screen"><br>0 Power flow</td>
+    <td align="center"><img src="../../docs/images/screens/05-1-today.png" width="240" alt="Today screen"><br>1 Today</td>
+    <td align="center"><img src="../../docs/images/screens/05-2-history.png" width="240" alt="History screen, Day tab"><br>2 History (day)</td>
   </tr>
   <tr>
-    <td align="center"><img src="../../docs/images/screens/05-3-weather.png" width="240" alt="Weather screen"><br>4 Weather</td>
-    <td align="center"><img src="../../docs/images/screens/05-4-moon.png" width="240" alt="Moon screen"><br>5 Moon</td>
-    <td align="center"><img src="../../docs/images/screens/05-5-aurora.png" width="240" alt="Aurora screen"><br>6 Aurora (UK)</td>
+    <td align="center"><img src="../../docs/images/screens/05-3-health.png" width="240" alt="Battery and grid screen"><br>3 Battery and grid</td>
+    <td align="center"><img src="../../docs/images/screens/05-4-weather.png" width="240" alt="Weather screen"><br>4 Weather</td>
+    <td align="center"><img src="../../docs/images/screens/05-5-moon.png" width="240" alt="Moon screen"><br>5 Moon</td>
   </tr>
   <tr>
-    <td align="center"><img src="../../docs/images/screens/05-6-sun.png" width="240" alt="Sun and space weather screen"><br>7 Sun and space weather</td>
-    <td align="center"><img src="../../docs/images/screens/05-7-enso.png" width="240" alt="El Nino screen"><br>8 El Nino</td>
-    <td align="center"><img src="../../docs/images/screens/05-8-settings.png" width="240" alt="Settings screen"><br>9 Settings</td>
+    <td align="center"><img src="../../docs/images/screens/05-6-aurora.png" width="240" alt="Aurora screen"><br>6 Aurora (UK)</td>
+    <td align="center"><img src="../../docs/images/screens/05-7-sun.png" width="240" alt="Sun and space weather screen"><br>7 Sun and space weather</td>
+    <td align="center"><img src="../../docs/images/screens/05-8-enso.png" width="240" alt="El Nino screen"><br>8 El Nino</td>
   </tr>
   <tr>
-    <td align="center"><img src="../../docs/images/screens/05-9-about.png" width="240" alt="About screen"><br>10 About</td>
+    <td align="center"><img src="../../docs/images/screens/05-9-settings.png" width="240" alt="Settings screen"><br>9 Settings</td>
+    <td align="center"><img src="../../docs/images/screens/05-10-about.png" width="240" alt="About screen"><br>10 About</td>
+    <td align="center"><img src="../../docs/images/screens/05-2-history-week.png" width="240" alt="History screen, Week tab"><br>2 History (week)</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="../../docs/images/screens/05-2-history-month.png" width="240" alt="History screen, Month tab"><br>2 History (month)</td>
     <td></td>
     <td></td>
   </tr>
@@ -100,8 +105,9 @@ Swipe left and right. The page dots at the bottom show where you are.
 
 | # | Screen | Shows |
 |---|---|---|
-| 1 | **Power flow** | A house in the centre with chevrons that run along each link in the direction power flows, faster for more power. Solar, Grid and Powerwall pills with live values; the Powerwall pill has a state-of-charge bar and "Charging", "Discharging" or "Idle". Chips for home voltage (amber outside 207-253 V), VA and var, and grid direction ("Importing" or "Exporting"). A card with the weather (temperature, condition, high and low, rain chance), the grid status (a red **OFF-GRID** banner in an outage) and a VPP row. A "Today" card with self-powered share and energy exported. Top bar: clock, date, Wi-Fi network and signal. |
-| 2 | **Today** | Self-powered percentage ring; solar, home and Powerwall energy in and out in kWh; exported and imported tiles; solar by hour. |
+| 0 | **Power flow** | A house in the centre with chevrons that run along each link in the direction power flows, faster for more power. Solar, Grid and Powerwall pills with live values; the Powerwall pill has a state-of-charge bar and "Charging", "Discharging" or "Idle". Chips for home voltage (amber outside 207-253 V), VA and var, and grid direction ("Importing" or "Exporting"). A card with the weather (temperature, condition, high and low, rain chance), the grid status (a red **OFF-GRID** banner in an outage) and a VPP row. A "Today" card with self-powered share and energy exported. Top bar: clock, date, Wi-Fi network and signal. |
+| 1 | **Today** | Self-powered percentage ring; solar, home and Powerwall energy in and out in kWh; exported and imported tiles; solar by hour. |
+| 2 | **History** | Energy per hour (Day), per day of the week (Week, Monday first) or per day of the month (Month). DAY / WEEK / MONTH tabs, a stepper to go back through earlier periods (the forward button is dimmed at the current one), and a self-powered pill for the period. The chart has solar bars up, grid import bars down, and on Day a line of battery percentage at the end of each hour. Tap a bar for its readout. Solar, Home and Grid tiles below show the period totals, with net export or import. Today comes from the live readings; earlier days come from the SD card (see [SD card](#sd-card)), so without a card only today shows. |
 | 3 | **Battery and grid** | State of charge, charge or discharge power and time to full or empty, grid voltage and frequency with normal-range markers, lifetime round-trip efficiency, and a grid-services (VPP) badge. |
 | 4 | **Weather** | Current conditions (feels-like, wind, high and low, rain chance), today's sunrise and sunset times (top right), the next 10 hours in 2-hour steps, and lifetime energy totals. |
 | 5 | **Moon** | A photograph of the full moon shaded on the device to the current phase, with phase name, illumination, age, moonrise and moonset, next full and new moon, and an eight-step phase strip. |
@@ -149,6 +155,7 @@ Optional, and recommended. The card is mounted after the display starts, checked
 | What | Where | Notes |
 |---|---|---|
 | Minute log | `/powerwall/YYYY-MM-DD.csv` | One file per local day, one row per minute averaged from the 2-second readings |
+| Daily history | `/powerwall/days/YYYY-MM.bin` | One file per month for the history screen. Raw, no header: 31 fixed slots (day of month minus 1) of 448 bytes each (13,888 bytes), each slot holding the day's totals (solar, home, export, import, battery in and out) and 24 hourly bins, with its own CRC, so a damaged slot loses only that day. Today's record is kept in RTC memory and saved every 10 minutes, on the hour and at midnight. A file is replaced by writing `.tmp` whole, then remove and rename; if power is cut between the two, the complete `.tmp` is used |
 | Today's totals backup | On the card, written atomically | Today's totals survive a power cut and a reboot; the baseline is restored at start-up |
 | Data cache | `/powerwall/cache/<name>.bin` | Weather, aurora, Kp, moon times, space weather, sun image, El Nino. After a reboot the screens fill at once and a fetch still inside its refresh window is skipped. Each record has a CRC; a bad or old-format record is ignored and refetched |
 | Settings | On the card | Brightness |
@@ -174,7 +181,7 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 
 | Command | Does |
 |---|---|
-| `s <n>` | Go to screen `n` (0 to 9) the way a swipe does |
+| `s <n>` | Go to screen `n` (0 to 10) the way a swipe does |
 | `n` / `p` | Next / previous screen (wraps) |
 | `l` | List the screens, the current one marked `*` |
 | `b <0-255>` | Set the backlight now over the current duty range (not saved; the panel driver cuts out below about 100/255) |
@@ -182,6 +189,7 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 | `bd <duty>` | Raw backlight duty at the current resolution, 0 to the maximum shown by `br` (not saved) |
 | `br` | Report the backlight: `backlight 100000 Hz, 8 bits, duty 255 of 255, assumed minimum 100 #ok` |
 | `bs [steps [ms [from [to]]]]` | Watch-the-panel sweep: steps the raw duty from `from` to `to` (default 0 to the maximum) in `steps` steps (default 16, 2 to 256), `ms` apart (default 1000, 100 to 10000), printing `bs i/n duty D @ F Hz` per step. Runs in the background; `bs 0` or any `b`, `bd` or `bf` stops it. The brightness setting comes back at the end (`bs done ... #ok`) |
+| `y [d\|w\|m\|-\|+]` | History screen: `d`, `w`, `m` pick the Day, Week or Month tab, `-` and `+` step to the previous or next period; no argument just describes what the screen shows. Every form also prints the day-history store status (records saved, loaded, errors) |
 | `m` | Print the memory and heap line |
 | `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |
 | `v <0\|1>` | Privacy mode for screenshots: placeholder Wi-Fi name and town (not saved) |
@@ -233,7 +241,7 @@ The guide also holds the write-ups behind the design choices: [investigations](.
 
 ## How it works
 
-One network task on core 0 (`powerwall.cpp`) polls the gateway every 2 seconds and runs at most one due background fetch (weather, aurora, Kp, moon times, space weather, sun image, El Nino) per pass, one TLS session at a time. LVGL runs on core 1 only. They share data through mutex-protected snapshots. `energy.cpp` keeps today's totals in RTC memory, and `history.cpp` owns all SD card access in one low-priority task. `cache.cpp` stores the fetched data on the card.
+One network task on core 0 (`powerwall.cpp`) polls the gateway every 2 seconds and runs at most one due background fetch (weather, aurora, Kp, moon times, space weather, sun image, El Nino) per pass, one TLS session at a time. LVGL runs on core 1 only. They share data through mutex-protected snapshots. `energy.cpp` keeps today's totals in RTC memory, and `history.cpp` owns all SD card access in one low-priority task. `cache.cpp` stores the fetched data on the card. `day_history.cpp` builds today's hourly record from the gateway's lifetime counters (RTC memory) and, on the SD task, saves it into the month files and keeps a three-month cache in PSRAM; the UI only reads that cache, never the card.
 
 Host-side tests of the parsers, the HTTP body reader and the cache run on a PC without a board: `.\projects\05-powerwall-display\hosttest\run.ps1` (see [`hosttest/README.md`](hosttest/README.md)). The moon image data is rebuilt by [`tools-moon/`](tools-moon/README.md).
 
