@@ -35,6 +35,7 @@ How to read it:
 | [D-18](#d-18-flash-backup-and-restore) | Flash backup and restore | safety | low | `tools/backup-flash.ps1` |
 | [D-19](#d-19-read-the-shipped-source-and-config) | Read the shipped source and config | research | low | `~/.platformio/packages` |
 | [D-20](#d-20-sub-agent-workflow) | Parallel sub-agent workflow | process | n/a | worktrees, contracts first |
+| [D-21](#d-21-rgb-scan-out-phase-monitor) | RGB scan-out phase monitor and forced resync | serial | firmware (board lib) | `lcd:` heartbeat, `[lcd] phase jump`, `k` |
 
 ## Symptom to first method
 
@@ -887,6 +888,21 @@ Sample brief fragments that mattered: "You own ONLY these files", "do not run pi
 
 ---
 
+## D-21 RGB scan-out phase monitor
+
+**When.** The panel image is shifted, wrapped or rolling while screenshots (D-10) look correct: the framebuffer is right and the RGB scan-out has lost its place. Use it to catch a drift without someone watching the screen, and to correlate it with what the firmware was doing.
+
+**How.** `initDisplay()` registers two esp_lcd RGB panel callbacks (`board4848::lcdDiagAttach`): VSYNC, and bounce-frame-finish (the bounce-buffer ISR has filled the last chunk of a frame). Every frame it measures the time from VSYNC to that last refill. While the refill position and the scan-out agree, this phase is constant; a skipped or doubled refill moves it by one bounce buffer (rows x line time: 20 x 45.7 us = ~0.9 ms at 12 MHz PCLK) and it stays moved. Arduino_GFX keeps the panel handle private; the board library reads it with the explicit-instantiation access idiom (no layout assumptions).
+
+- Heartbeat (every 10 s): `lcd: diag on, <vsyncs>, <refill frames>, phase <min>..<max> us (last ..), jumps N, restarts N`. Healthy unit 1 (2026-10-11): 42 vsyncs/s, phase ~21.35-21.94 ms, last ~21.41 ms.
+- `[lcd] phase jump #n: a -> b us ... | screen, net phase, sd write age`: printed as soon as a frame-to-frame change exceeds `B4848_LCD_DIAG_JUMP_US` (default 300). Single ~0.4 ms jumps that return the next frame are ISR jitter; a drift is a move that stays (the window minimum moves).
+- `k`: `esp_lcd_rgb_panel_restart()`; the driver restarts the scan-out DMA at the next VSYNC. Tests whether a live drift can be healed without a reboot.
+
+**Pitfalls.** The bounce-frame-finish callback is deprecated in IDF 5.4 but still called; registering callbacks replaces any the library set (Arduino_GFX sets none). Keep the callbacks short and in IRAM.
+
+**Cost.** Two ISR callbacks per frame and one heartbeat line.
+
+---
 ## Combining methods: three worked chains
 
 **Intermittent task watchdog reset.** D-08 (capture until it happens) -> D-07 (decode: `lwip_read` under `HTTPClient::connected()`) -> D-19 (read the loop) -> D-13 (curl shows which endpoints are chunked) -> fix -> D-12 (test framing at every split) -> D-11 (soak). [#inv-task-wdt-chunked-httpclient](03-investigations.md#inv-chunked-stall).

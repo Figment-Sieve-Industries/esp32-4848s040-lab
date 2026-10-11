@@ -1013,6 +1013,9 @@ The same screenshot pass fixed text fit (the "Geomagnetic" chip, the health life
 3. Hypothesis A: SD traffic on the pins shared with the ST7701's 3-wire bus (SCK 48, SDA 47) clocking garbage into the panel. Diag `y s <n>` logged GPIO39 (panel CS) around each save: output enabled, level 1 throughout. 60 forced saves (20 + 40, 210-260 ms each), owner watching: **no shift**. Rejected for now.
 4. Hypothesis B: a burst of PSRAM/SD/network load at the same moment. Not reproduced by the save bursts alone.
 
+5. It came back twice more the same evening: about 9 minutes after a boot of the history build, before its first 10-minute save, and within minutes on commit `2702d94` (bisect step 1: the last build **before** the history, weather and screen-toggle work). So none of today's history/toggle code is needed to trigger it; earlier builds had run for hours without a report.
+6. Method added: D-21 (scan-out phase monitor, `lcd:` heartbeat, `[lcd] phase jump`, `k` = forced resync), so a drift can be caught over serial without someone watching. Healthy baseline: 42 vsyncs/s, VSYNC to last refill ~21.41 ms, single ~0.4 ms jitter jumps that return the next frame.
+
 **Notes.** `[stall]` lines of 0.6-1.7 s on the history screen are not stalls: the screen is static (0 fps), and the next frame reports the idle gap (the detector counts any gap of 120-2000 ms).
 
 **Next.** Long soak with the owner noting the time if it recurs; candidates: an automatic panel resync (`esp_lcd_rgb_panel_restart` in a quiet moment, needs the panel handle from Arduino_GFX), or a lower PCLK. Nothing changed yet.

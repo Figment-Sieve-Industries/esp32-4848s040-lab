@@ -132,7 +132,86 @@ Arduino_RGB_Display *initDisplay(uint8_t rotation, size_t bouncePx) {
         delete bus;
         return nullptr;
     }
+    lcdDiagAttach(panel);
     return gfx;
+}
+
+// ---------------- RGB scan-out diagnostics (panel drift) ----------------
+// Arduino_ESP32RGBPanel keeps the esp_lcd handle private and registers no callbacks of its own. The handle is
+// read through the standard explicit-instantiation access idiom (legal C++, no layout assumptions).
+namespace {
+template <typename Tag, typename Tag::type M> struct PrivateAccess {
+    friend typename Tag::type privateMember(Tag) { return M; }
+};
+struct PanelHandleTag {
+    using type = esp_lcd_panel_handle_t Arduino_ESP32RGBPanel::*;
+    friend type privateMember(PanelHandleTag);
+};
+template struct PrivateAccess<PanelHandleTag, &Arduino_ESP32RGBPanel::_panel_handle>;
+
+esp_lcd_panel_handle_t s_panelHandle = nullptr;
+portMUX_TYPE s_diagMux = portMUX_INITIALIZER_UNLOCKED;
+LcdDiag s_diag;             // guarded by s_diagMux (ISR writes, task reads)
+int64_t s_lastVsyncUs = 0;  // ISR only
+int32_t s_prevDelta = -1;   // ISR only
+
+// VSYNC: start of a new frame on the panel.
+bool IRAM_ATTR onVsync(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *) {
+    s_lastVsyncUs = esp_timer_get_time();
+    portENTER_CRITICAL_ISR(&s_diagMux);
+    s_diag.vsyncs++;
+    portEXIT_CRITICAL_ISR(&s_diagMux);
+    return false;
+}
+
+// The bounce-buffer ISR has filled the last chunk of a frame. Its phase against VSYNC is fixed while the fill
+// position and the scan-out agree; a skipped or doubled refill moves it by one bounce buffer (rows x line time)
+// and it stays moved: that is the sideways shift on a rotated panel.
+bool IRAM_ATTR onBounceFrameFinish(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t *, void *) {
+    const int32_t delta = static_cast<int32_t>(esp_timer_get_time() - s_lastVsyncUs);
+    portENTER_CRITICAL_ISR(&s_diagMux);
+    s_diag.bbFrames++;
+    s_diag.deltaLast = delta;
+    if (s_diag.windowFrames++ == 0 || delta < s_diag.deltaMin) s_diag.deltaMin = delta;
+    if (s_diag.windowFrames == 1 || delta > s_diag.deltaMax) s_diag.deltaMax = delta;
+    if (s_prevDelta >= 0 && (delta - s_prevDelta > B4848_LCD_DIAG_JUMP_US || s_prevDelta - delta > B4848_LCD_DIAG_JUMP_US)) {
+        s_diag.jumps++;
+        s_diag.jumpFrom = s_prevDelta;
+        s_diag.jumpTo = delta;
+    }
+    portEXIT_CRITICAL_ISR(&s_diagMux);
+    s_prevDelta = delta;
+    return false;
+}
+} // namespace
+
+void lcdDiagAttach(Arduino_ESP32RGBPanel *panel) {
+    s_panelHandle = panel->*privateMember(PanelHandleTag());
+    if (!s_panelHandle) return;
+    esp_lcd_rgb_panel_event_callbacks_t cbs = {};
+    cbs.on_vsync = onVsync;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    cbs.on_bounce_frame_finish = onBounceFrameFinish; // deprecated in IDF 5.4 but still called in bounce mode
+#pragma GCC diagnostic pop
+    s_diag.attached = esp_lcd_rgb_panel_register_event_callbacks(s_panelHandle, &cbs, nullptr) == ESP_OK;
+}
+
+LcdDiag lcdDiag(bool resetWindow) {
+    portENTER_CRITICAL(&s_diagMux);
+    LcdDiag d = s_diag;
+    if (resetWindow) s_diag.windowFrames = 0;
+    portEXIT_CRITICAL(&s_diagMux);
+    return d;
+}
+
+bool lcdRestart() {
+    if (!s_panelHandle) return false;
+    if (esp_lcd_rgb_panel_restart(s_panelHandle) != ESP_OK) return false;
+    portENTER_CRITICAL(&s_diagMux);
+    s_diag.restarts++;
+    portEXIT_CRITICAL(&s_diagMux);
+    return true;
 }
 
 // ---------------- Backlight ----------------

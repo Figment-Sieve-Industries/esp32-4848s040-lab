@@ -580,6 +580,9 @@ static void handleCommand(char *line) {
         case 'y':
             cmdHistory(arg);
             break;
+        case 'k': // DIAG panel drift: restart the RGB scan-out at the next VSYNC
+            cmdReply(board4848::lcdRestart() ? "lcd restart requested #ok" : "#err lcd restart not available");
+            break;
         case 'm':
             cmdMem();
             break;
@@ -684,9 +687,23 @@ void setup() {
                   (unsigned long)ESP.getFreePsram());
 }
 
+// DIAG panel drift: report a scan-out phase jump as soon as it happens, with what else was going on
+static void lcdDiagTick() {
+    static uint32_t seenJumps = 0;
+    board4848::LcdDiag d = board4848::lcdDiag();
+    if (d.jumps == seenJumps) return;
+    seenJumps = d.jumps;
+    SdStatus sd = historyStatus();
+    Serial.printf("  [lcd] phase jump #%lu: %ld -> %ld us (vsync to last refill) at %lu ms | screen %d, net %u, "
+                  "sd write age %lu s\n",
+                  (unsigned long)d.jumps, (long)d.jumpFrom, (long)d.jumpTo, (unsigned long)millis(), current, g_netPhase,
+                  (unsigned long)sd.lastWriteAgeS);
+}
+
 void loop() {
     pollSerialCommands();
     sweepTick();
+    lcdDiagTick();
 
     // Sleep only until the next LVGL timer is due (capped), so frames aren't delayed
     static uint32_t loopEnd; // DIAG
@@ -738,5 +755,10 @@ void loop() {
         Serial.printf("  redraw: %lu px/s, %lu flushes/s | net: %lu TLS connects, %lu requests, %lu failures\n",
                       (unsigned long)((uint64_t)invPx * 1000 / windowMs), (unsigned long)((uint64_t)flushes * 1000 / windowMs),
                       (unsigned long)ns.tlsConnects, (unsigned long)ns.requests, (unsigned long)ns.failures);
+        board4848::LcdDiag ld = board4848::lcdDiag(true);
+        Serial.printf("  lcd: %s %lu vsyncs, %lu refill frames, phase %ld..%ld us (last %ld), jumps %lu, restarts %lu\n",
+                      ld.attached ? "diag on," : "diag OFF,", (unsigned long)ld.vsyncs, (unsigned long)ld.bbFrames,
+                      (long)ld.deltaMin, (long)ld.deltaMax, (long)ld.deltaLast, (unsigned long)ld.jumps,
+                      (unsigned long)ld.restarts);
     }
 }

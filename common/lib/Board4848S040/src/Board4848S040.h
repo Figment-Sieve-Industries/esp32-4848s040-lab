@@ -12,6 +12,28 @@ namespace board4848 {
 // (Other panel failures inside Arduino_GFX abort via ESP_ERROR_CHECK.)
 Arduino_RGB_Display *initDisplay(uint8_t rotation = 0, size_t bouncePx = B4848_LCD_BOUNCE_PX);
 
+// ---- RGB scan-out diagnostics (panel drift) ----
+// initDisplay() registers VSYNC and bounce-frame-finish callbacks on the esp_lcd RGB panel. Each frame the time
+// from VSYNC to the end of the frame's bounce-buffer refills is measured; a jump of more than
+// B4848_LCD_DIAG_JUMP_US means the refill position and the scan-out moved apart (the sideways image shift).
+#ifndef B4848_LCD_DIAG_JUMP_US
+#define B4848_LCD_DIAG_JUMP_US 300
+#endif
+struct LcdDiag {
+    bool attached = false;      // callbacks registered
+    uint32_t vsyncs = 0;        // frames scanned out since boot
+    uint32_t bbFrames = 0;      // frames whose refills finished since boot
+    uint32_t windowFrames = 0;  // frames in the min/max window (reset by lcdDiag(true))
+    int32_t deltaMin = 0, deltaMax = 0, deltaLast = 0; // us from VSYNC to the frame's last refill
+    uint32_t jumps = 0;         // frame-to-frame phase changes > B4848_LCD_DIAG_JUMP_US since boot
+    int32_t jumpFrom = 0, jumpTo = 0; // the last jump
+    uint32_t restarts = 0;      // lcdRestart() calls that were accepted
+};
+void lcdDiagAttach(Arduino_ESP32RGBPanel *panel); // called by initDisplay()
+LcdDiag lcdDiag(bool resetWindow = false);
+// esp_lcd_rgb_panel_restart(): the driver restarts the scan-out DMA at the next VSYNC. False if unavailable.
+bool lcdRestart();
+
 // ---- Backlight: LEDC PWM on the EN pin of the boost driver ----
 // The PWM starts at B4848_LCD_BL_FREQ_HZ (default 100 kHz) with the highest duty resolution LEDC allows at that
 // frequency (capped at B4848_LCD_BL_MAX_RES_BITS): 8 bits at 100 kHz, 10 bits at 20-25 kHz.
