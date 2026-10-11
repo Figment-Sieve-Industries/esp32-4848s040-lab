@@ -689,6 +689,10 @@ void dayHistoryUpdate(const PwData &d, const TodayStats &t) {
             r.battIn = static_cast<float>(t.battInKWh);
             r.battOut = static_cast<float>(t.battOutKWh);
             r.flags = static_cast<uint8_t>(t.partial ? (r.flags | DAY_PARTIAL) : (r.flags & ~DAY_PARTIAL));
+            // energy.cpp bins solar per hour since its baseline: fill finished hours this record missed
+            // (the first day after flashing, or bins lost in a power cut without a card)
+            for (int h = 0; h < hour && h < 24; h++)
+                if (r.hSolar[h] <= 0.0f && t.hourlySolarKWh[h] > 0.0f) r.hSolar[h] = t.hourlySolarKWh[h];
         } else {
             fillTotalsIfEmpty(r);
         }
