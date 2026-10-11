@@ -28,7 +28,7 @@ A wall-mounted energy monitor for **Tesla Powerwall 3** owners. The ESP32 talks 
     <td align="center"><a href="docs/images/screens/05-8-enso.png"><img src="docs/images/screens/05-8-enso.png" width="240" alt="El Nino screen: ENSO status, Nino 3.4 and outlook odds"></a><br>El Nino (ENSO)</td>
   </tr>
   <tr>
-    <td align="center"><a href="docs/images/screens/05-9-settings.png"><img src="docs/images/screens/05-9-settings.png" width="240" alt="Settings screen: brightness slider and SD card status"></a><br>Settings (brightness, SD card)</td>
+    <td align="center"><a href="docs/images/screens/05-9-settings.png"><img src="docs/images/screens/05-9-settings.png" width="240" alt="Settings screen: brightness slider, screen on/off switches and SD card status"></a><br>Settings (brightness, screens on/off, SD card)</td>
     <td align="center"><a href="docs/images/screens/05-10-about.png"><img src="docs/images/screens/05-10-about.png" width="240" alt="About screen: data sources and credits"></a><br>About and credits</td>
     <td align="center"><a href="docs/images/screens/05-2-history-week.png"><img src="docs/images/screens/05-2-history-week.png" width="240" alt="History screen, Week tab: solar and grid import per day"></a><br>History (week)</td>
   </tr>
@@ -44,7 +44,7 @@ Screenshots are real framebuffer captures from the board, taken in privacy mode 
 **What it does**
 
 - **Live power flow** from the gateway every 2 seconds: solar, grid, house load and Powerwall power, battery state of charge, grid import or export, voltage, and an off-grid banner during an outage.
-- **Eleven swipeable screens:** power flow, today, history, battery and grid, weather, moon, aurora (UK), sun and space weather, El Nino, settings (SD card status and brightness), and about.
+- **Eleven swipeable screens:** power flow, today, history, battery and grid, weather, moon, aurora (UK), sun and space weather, El Nino, settings (brightness, turn optional screens on or off, SD card status), and about. Screens you turn off are skipped when swiping and stop their data fetches.
 - **History charts:** solar and grid import per hour, per day of the week and per day of the month, with the battery level on the day view, a tap-for-readout on every bar and a stepper back through earlier periods. Needs the SD card for anything before today.
 - **Weather** shows today's sunrise and sunset.
 - **Local only.** It uses the same customer login as the gateway's own web page. There is no Tesla cloud account, API key or subscription, and your Powerwall readings are never sent anywhere. The only outside requests are to the public weather and space-weather sources listed below (the weather ones carry your configured location).

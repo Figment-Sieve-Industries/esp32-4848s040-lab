@@ -174,6 +174,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 | [Q-TOOL-10](#q-tool-10) | esptool v5 syntax and finding the port | D | PlatformIO's bundled esptool |
 | [Q-TOOL-11](#q-tool-11) | Public-repo hygiene: secrets and identifiers in history | W | Any repo going public |
 | [Q-TOOL-12](#q-tool-12) | Decoding a crash backtrace | D | Any Arduino-ESP32 firmware |
+| [Q-TOOL-13](#q-tool-13) | A screenshot right after privacy mode can still show the SSID | F | This project's screenshot tool |
 
 ---
 
@@ -991,6 +992,14 @@ Checked with `curl` on 2026-10-11 around 12:00 UTC; full tables in [docs/11](../
 - **Fix:** `monitor_filters = esp32_exception_decoder` decodes live. Offline: `xtensa-esp32s3-elf-addr2line -pfiaC -e .pio/build/<env>/firmware.elf <addresses>` (from `~/.platformio/packages/toolchain-xtensa-esp-elf/bin`). A backtrace through `HTTPClient::getString` names [Q-NET-01](#q-net-01); one through `is_jpg` names [Q-LVGL-02](#q-lvgl-02); one ending in `xQueueSemaphoreTake` from an early task names [Q-FW-01](#q-fw-01).
 - **Evidence:** Used for all three crashes above.
 - **Status:** documented. **Applies to:** any Arduino-ESP32 firmware.
+
+<a id="q-tool-13"></a>
+### Q-TOOL-13 A screenshot right after privacy mode can still show the SSID
+- **Symptom:** `screendump.py ... --privacy` without `--all` saved a PNG whose top bar showed the real Wi-Fi name.
+- **Root cause:** `v 1` refreshed the current screen but not its top bar; the top bar only changed on the next 500 ms refresh tick, and a single shot can be faster than that.
+- **Fix:** the `v` command now updates the top bar at once (`ui::topBarUpdateFor`), and `screendump.py` waits 1.5 s after `v 1`. Look at every PNG before committing it.
+- **Evidence:** A single shot on 2026-10-11 (deleted, never committed).
+- **Status:** fixed. **Applies to:** this project's screenshot tool.
 
 ---
 

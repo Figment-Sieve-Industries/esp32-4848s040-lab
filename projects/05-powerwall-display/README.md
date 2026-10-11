@@ -114,7 +114,7 @@ Swipe left and right. The page dots at the bottom show where you are.
 | 6 | **Aurora (UK)** | The AuroraWatch UK alert level, the last 24 hours of activity, and a three-day Kp strip (seen and forecast). |
 | 7 | **Sun and space weather** | A live photo of the Sun from SOHO, X-ray flare class and odds, NOAA R/S/G scales, solar wind, sunspot number and F10.7 flux. |
 | 8 | **El Nino (ENSO)** | The NOAA CPC status, weekly Nino 3.4 and its anomaly, ONI and RONI, 12 months of history and the outlook odds. |
-| 9 | **Settings** | Backlight brightness slider, 0 to 100 % on a gamma curve (0 % is the dimmest level that is still lit; the position is saved on the SD card) and SD card status: card type and clock, space used, today's log file, lines written, last write, and whether today's totals are backed up. |
+| 9 | **Settings** | Backlight brightness slider, 0 to 100 % on a gamma curve (0 % is the dimmest level that is still lit). **Screens** switches for History, Battery & grid, Weather, Moon, Aurora, Sun and El Nino (power flow, Today, Settings and About are always on): a screen that is off is skipped when swiping, drops out of the page dots and stops its fetches (Moon: MET Norway moon times; Aurora: AuroraWatch + Kp; Sun: SWPC + the SOHO image; El Nino: CPC). Weather keeps fetching because the power-flow screen's weather card uses it, and history logging keeps running. Objects of an off screen stay allocated until the next restart. One-line SD card status (clock, space, errors). Brightness and screens are saved on the SD card (`settings.bin`, format SET3; SET1/SET2 files still load). |
 | 10 | **About** | The firmware name and the data credits for every source the device uses. |
 
 If gateway data is more than 20 seconds old the values show `--`, and a short error message appears below the page dots. Weather older than an hour is shown as stale.
@@ -189,6 +189,8 @@ Type a line into the serial monitor (115200 baud) to drive the display without t
 | `bd <duty>` | Raw backlight duty at the current resolution, 0 to the maximum shown by `br` (not saved) |
 | `br` | Report the backlight: `backlight 100000 Hz, 8 bits, duty 255 of 255, assumed minimum 100 #ok` |
 | `bs [steps [ms [from [to]]]]` | Watch-the-panel sweep: steps the raw duty from `from` to `to` (default 0 to the maximum) in `steps` steps (default 16, 2 to 256), `ms` apart (default 1000, 100 to 10000), printing `bs i/n duty D @ F Hz` per step. Runs in the background; `bs 0` or any `b`, `bd` or `bf` stops it. The brightness setting comes back at the end (`bs done ... #ok`) |
+| `e [<n> <0\|1>]` | Screens on/off: `e` lists the mask, `e 5 0` turns screen 5 off (same as the Settings switch, saved). Always-on screens answer `#err screen can't be disabled`; `s <n>` to an off screen answers `#err screen disabled`; `l` marks off screens with `-` |
+| `y s <1..50>` | Diagnostic: save today's history record n times in a row, logging the panel CS pin (GPIO39) around each save (panel-drift investigation, see guide 03 `inv-panel-drift`) |
 | `y [d\|w\|m\|-\|+]` | History screen: `d`, `w`, `m` pick the Day, Week or Month tab, `-` and `+` step to the previous or next period; no argument just describes what the screen shows. Every form also prints the day-history store status (records saved, loaded, errors) |
 | `m` | Print the memory and heap line |
 | `x` | Screenshot: the framebuffer as base64 lines at 921600 baud (used by `screendump.py`) |

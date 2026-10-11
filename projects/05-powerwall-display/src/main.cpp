@@ -505,6 +505,18 @@ static void handleBacklightCommand(char sub, const char *arg) {
 // y [d|w|m|-|+]: drive the history screen like its controls, then describe it (see the top of the file)
 static void cmdHistory(const char *arg) {
     bool ok = true;
+    if (arg[0] == 's' && (arg[1] == ' ' || arg[1] == '\0')) { // DIAG: y s <n> forced month-file saves
+        long n = 1;
+        if (arg[1] && !parseInt(arg + 2, 1, 50, n)) {
+            cmdReply("#err usage: y s <1..50>");
+            return;
+        }
+        dayhist::dayHistoryForceSaves(static_cast<int>(n));
+        char msg[64];
+        snprintf(msg, sizeof(msg), "y s: %ld forced saves queued #ok", n);
+        cmdReply(msg);
+        return;
+    }
     if (!strcmp(arg, "d")) ok = historySetMode(0);
     else if (!strcmp(arg, "w")) ok = historySetMode(1);
     else if (!strcmp(arg, "m")) ok = historySetMode(2);
@@ -580,6 +592,7 @@ static void handleCommand(char *line) {
             } else {
                 ui::setPrivacy(v != 0);
                 screens[current].refresh();
+                ui::topBarUpdateFor(current); // the SSID must be gone before a screenshot right after this
                 cmdReply(v ? "privacy on #ok" : "privacy off #ok");
             }
             break;

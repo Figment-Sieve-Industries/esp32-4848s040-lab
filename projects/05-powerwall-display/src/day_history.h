@@ -79,6 +79,10 @@ void dayHistoryView(View &out);
 // SD task only (history.cpp's loop, every 250 ms): saves due records and serves pending reads.
 void dayHistorySdTick(bool mounted);
 
+// DIAG (serial "y s <n>"): save today's record n times in a row on the SD task, logging the panel's CS pin
+// around each save (panel-drift investigation). UI thread.
+void dayHistoryForceSaves(int n);
+
 // Diagnostics for the serial "y" command: one line describing records saved / loaded / errors.
 void dayHistoryStatusLine(char *buf, size_t n);
 

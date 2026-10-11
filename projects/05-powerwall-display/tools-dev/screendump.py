@@ -126,6 +126,7 @@ def main():
     ser.open()
     if a.privacy:
         print(command(ser, "v 1"))
+        time.sleep(1.5)  # let the top bar redraw with the placeholder before any shot (older firmware: next tick)
     targets = []
     if a.all:
         listing = command(ser, "l")  # "screens: 0*house, 1 today, ... #ok" (* = current)

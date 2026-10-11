@@ -50,6 +50,7 @@ Hardware: one Guition ESP32-4848S040C_I ("unit 1"; ESP32-S3 N16R8, 4" 480x480 ST
 | [inv-tls-gateway-refusals](#inv-tls-gateway-refusals) | Gateway refuses TLS handshakes | Network | open (keep-alive under trial) | 27.9 -> 2.2 TLS connects/min; 19 -> 1 refusals | 2026-10-11 |
 | [inv-barchart-empty](#inv-barchart-empty) | Aurora and sun bar strips empty | UI | fixed | empty -> drawn (seen in screenshots) | 2026-10-11 |
 | [inv-tooling-pitfalls](#inv-tooling-pitfalls) | Measurements spoiled by tooling | Method | documented | 2 measurements invalidated | 2026-10-11 |
+| [inv-panel-drift](#inv-panel-drift) | Panel image shifted sideways once | Display | open | 60 forced SD saves: no shift | 2026-10-11 |
 | [inv-minor](#inv-minor) | Smaller findings | Various | mostly fixed | see table | 2026-10-08 to 11 |
 
 ---
@@ -996,6 +997,30 @@ The same screenshot pass fixed text fit (the "Geomagnetic" chip, the health life
 
 ---
 
+### <a id="inv-panel-drift"></a>Panel image shifted sideways (open)
+
+| | |
+|---|---|
+| Date | 2026-10-11 |
+| Area | Display |
+| Status | open: seen once, not reproduced; a reboot cleared it |
+
+**Symptom.** "the screen has gone glitchy and wrapping slightly around" (owner), during a soak of the history build. The shift stayed until a reboot.
+
+**What was checked.**
+1. Screenshot (`x`) while the panel was shifted: the framebuffer was correct. So LVGL drew the right picture; the panel's RGB scan-out lost its position (DMA/bounce-buffer underrun class, [12](../12-esp32-performance-and-framework.md) section 3), not a rendering bug.
+2. No reset, crash or watchdog in the soak log. The only new kind of I/O in that build: the history month file (14 KB) saved every 10 minutes; the first save in that run took 632 ms.
+3. Hypothesis A: SD traffic on the pins shared with the ST7701's 3-wire bus (SCK 48, SDA 47) clocking garbage into the panel. Diag `y s <n>` logged GPIO39 (panel CS) around each save: output enabled, level 1 throughout. 60 forced saves (20 + 40, 210-260 ms each), owner watching: **no shift**. Rejected for now.
+4. Hypothesis B: a burst of PSRAM/SD/network load at the same moment. Not reproduced by the save bursts alone.
+
+**Notes.** `[stall]` lines of 0.6-1.7 s on the history screen are not stalls: the screen is static (0 fps), and the next frame reports the idle gap (the detector counts any gap of 120-2000 ms).
+
+**Next.** Long soak with the owner noting the time if it recurs; candidates: an automatic panel resync (`esp_lcd_rgb_panel_restart` in a quiet moment, needs the panel handle from Arduino_GFX), or a lower PCLK. Nothing changed yet.
+
+**Sources.** `soak-history.log`, `y s` runs (transcript 2026-10-11).
+
+---
+
 ### <a id="inv-minor"></a>Smaller findings
 
 | Anchor | Date | Finding | Evidence | Fix (commit) | Status |
@@ -1009,6 +1034,8 @@ The same screenshot pass fixed text fit (the "Geomagnetic" chip, the health life
 | <a id="inv-baseline-padding"></a>inv-baseline-padding | 2026-10-11 | Restoring today's totals from SD could produce a copy that fails its own checksum | Struct assignment may not copy padding that the FNV checksum covers | `memcpy` (`14a049f`) | fixed before reaching the device |
 | <a id="inv-wifi-nvs-writes"></a>inv-wifi-nvs-writes | 2026-10-11 | Wi-Fi config written to NVS (internal flash) at runtime | Research: `WiFi.persistent()` defaults to true in core 3.2.1 (`WiFiGeneric.cpp`) | `WiFi.persistent(false)` (`cca53c5`) | fixed |
 | <a id="inv-swpc-a00"></a>inv-swpc-a00 | 2026-10-11 | Sun screen showed flare class `A0.0` | Interpreted as SWPC reporting zero flux during a GOES data gap (not confirmed against NOAA documentation) | `A0.0` ignored, last class kept (`496462e`) | fixed |
+| <a id="inv-settings-load-v3"></a>inv-settings-load-v3 | 2026-10-11 | Screen on/off switches and brightness forgotten after a reboot | Serial: `e 5 0`, reboot, `e` showed 0x7ff; `history.cpp` still decoded with the SET2-only `percentFromSaved`, which rejects "SET3" | `loadSettings` uses `setcodec::decodeSettings`; boot log prints `settings loaded (v3, ..., screens 0x...)` | fixed, checked on hw |
+| <a id="inv-dayhist-junk-file"></a>inv-dayhist-junk-file | 2026-10-11 | A forced save right after boot wrote `/powerwall/days/-73918--60.bin` | The diag `y s` copied today's RTC record before the clock was valid; `saveRecord` built the path from an unchecked date | `saveRecord` refuses invalid dates; the junk file was removed by the next boot | fixed |
 | <a id="inv-sun-jpeg-6"></a>inv-sun-jpeg-6 | 2026-10-11 | `Space: sun JPEG decode failed (6)` once in `soak-flush2.log` | One occurrence in 5 soaks; TJpgDec error 6 not investigated | none | open |
 
 ---

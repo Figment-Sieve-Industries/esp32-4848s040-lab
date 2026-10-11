@@ -66,19 +66,23 @@ void applyBacklight(int pct) {
 void loadSettings() {
     SettingsFile f;
     memset(&f, 0, sizeof(f));
-    int pct = 0;
+    setcodec::Decoded d;
     // Wrong size, unknown magic or an out-of-range value all fall back to the defaults.
     bool ok = sdcard::readAtomic(SETTINGS_PATH, &f, sizeof(f)) &&
-              blcurve::percentFromSaved(f.magic, f.value, B4848_LCD_BL_MIN, pct);
+              setcodec::decodeSettings(f.magic, f.value, f.screenMask, B4848_LCD_BL_MIN, d);
     {
         LockGuard g(s_lock);
         s_settingsLoaded = true;
         if (!ok || s_settingsDirty) return; // keep defaults, or a change made before the card was read
-        s_settings.brightnessPct = static_cast<uint8_t>(pct);
+        s_settings.brightnessPct = static_cast<uint8_t>(d.brightnessPct);
+        s_settings.screenMask = d.screenMask;
     }
-    applyBacklight(pct);
-    Serial.printf("SD: settings loaded (%s, brightness %d%%)\n",
-                  f.magic == blcurve::SETTINGS_MAGIC_V2 ? "v2" : "v1 converted", pct);
+    applyBacklight(d.brightnessPct);
+    Serial.printf("SD: settings loaded (%s, brightness %d%%, screens 0x%03x)\n",
+                  f.magic == setcodec::SETTINGS_MAGIC_V3   ? "v3"
+                  : f.magic == blcurve::SETTINGS_MAGIC_V2 ? "v2"
+                                                          : "v1 converted",
+                  d.brightnessPct, (unsigned)d.screenMask);
 }
 
 void saveSettingsIfDue() {

@@ -13,7 +13,10 @@
 #include "day_history.h"
 
 #include <Arduino.h>
+#include <Board4848S040_pins.h>
 #include <SD.h>
+#include <driver/gpio.h>
+#include <soc/gpio_reg.h>
 #include <atomic>
 #include <esp_attr.h>
 #include <math.h>
@@ -497,6 +500,10 @@ LoadStatus ensureMonth(int ym, const int *keep, int nkeep) {
 }
 
 bool saveRecord(const DayRecord &rec) {
+    if (!validDate(rec.date)) { // never derive a path from a record that isn't one (e.g. RTC before the clock)
+        Serial.printf("dayhist: refusing to save a record with date %ld\n", static_cast<long>(rec.date));
+        return false;
+    }
     const int ym = calc::monthOf(rec.date);
     if (ensureMonth(ym, &ym, 1) == LoadStatus::Error) return false;
     uint32_t t0 = millis();
@@ -755,8 +762,57 @@ void dayHistoryView(View &out) {
     out.seq = s_viewSeq;
 }
 
+// DIAG panel drift (serial "y s <n>"): save a copy of today's record n times, one per SD tick, logging the
+// ST7701 CS pin (GPIO39, shared SCK/SDA with the card) around each save.
+namespace {
+DayRecord s_forceRec;
+std::atomic_int s_forceN{0};
+
+void logPanelCs(const char *when) {
+    const uint32_t en = REG_READ(GPIO_ENABLE1_REG), out = REG_READ(GPIO_OUT1_REG);
+    const int bit = B4848_LCD_CS - 32;
+    Serial.printf("dayhist: diag %s: lcd cs gpio%d output-enable %d level %d (in %d)\n", when, B4848_LCD_CS,
+                  (int)((en >> bit) & 1), (int)((out >> bit) & 1), gpio_get_level(static_cast<gpio_num_t>(B4848_LCD_CS)));
+}
+
+// The junk file the first diag run wrote (fired before the clock was valid, before saveRecord checked dates)
+void removeDiagJunk() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    sdcard::Lock lk;
+    if (SD.exists("/powerwall/days/-73918--60.bin") && SD.remove("/powerwall/days/-73918--60.bin"))
+        Serial.println("dayhist: removed the junk file from the first diag run");
+}
+
+bool serveForce() {
+    removeDiagJunk();
+    if (s_forceN.load() <= 0) return false;
+    DayRecord r;
+    {
+        LockGuard g(s_mu);
+        memcpy(&r, &s_forceRec, REC_SZ);
+    }
+    const int left = --s_forceN;
+    logPanelCs("before save");
+    const bool ok = saveRecord(r);
+    logPanelCs(ok ? "after save" : "after FAILED save");
+    if (left == 0) Serial.println("dayhist: diag forced saves done");
+    return true;
+}
+} // namespace
+
+void dayHistoryForceSaves(int n) {
+    {
+        LockGuard g(s_mu);
+        memcpy(&s_forceRec, &rtc.rec, REC_SZ);
+    }
+    s_forceN.store(n);
+}
+
 void dayHistorySdTick(bool mounted) {
     s_mounted.store(mounted);
+    if (mounted && serveForce()) return;
     if (mounted != s_prevMounted) {
         s_prevMounted = mounted;
         if (mounted) { // new or swapped card: forget what the old one held
