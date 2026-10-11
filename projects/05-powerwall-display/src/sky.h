@@ -56,7 +56,7 @@ MoonTimes moonTimes();
 constexpr uint32_t SKY_STALE_MS = 2UL * 60UL * 60UL * 1000UL; // 2 h (fetched every 30 min)
 
 // ---- Fetchers, called only by the network task in powerwall.cpp ----
-// fetchAurora() is plain HTTP; the other two use TLS (one session at a time on that task).
+// skyFetchAurora() is plain HTTP; the other two use TLS (one session at a time on that task).
 bool skyFetchAurora();
 bool skyFetchKp();
 bool skyFetchMoon();

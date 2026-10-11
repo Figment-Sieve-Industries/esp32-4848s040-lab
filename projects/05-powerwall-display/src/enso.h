@@ -1,8 +1,8 @@
 #pragma once
 // El Nino / ENSO state for the ENSO screen (docs/11-space-weather-and-climate-data.md), from
 // NOAA CPC (www.cpc.ncep.noaa.gov, Go Daddy Root CA G2). Static text files fetched with HTTP Range
-// tails, plus the first 8 KB of the ENSO discussion page. Fetched by the network task in
-// powerwall.cpp about twice a day. Getter returns a thread-safe copy.
+// tails, plus the whole ENSO discussion page (Range bytes=0-16383), streamed through a tag stripper.
+// Fetched by the network task in powerwall.cpp about twice a day. Getter returns a thread-safe copy.
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
@@ -40,5 +40,6 @@ EnsoData ensoData();
 
 constexpr uint32_t ENSO_STALE_MS = 3UL * 24UL * 60UL * 60UL * 1000UL; // 3 days
 
-// Called only by the network task (one TLS session at a time). One keep-alive connection for all files.
+// Called only by the network task (one TLS session at a time). One keep-alive connection for all files;
+// returns false (data still swapped in) when a part failed or the job's time budget ran out.
 bool ensoFetch();

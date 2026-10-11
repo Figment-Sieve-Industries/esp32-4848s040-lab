@@ -1,24 +1,18 @@
 // Space weather (NOAA SWPC) and the SOHO HMI sun picture - see space.h and docs/11.
 // Called from the network task in powerwall.cpp (core 0), which serialises TLS sessions.
-// Results are swapped in under lock() only at the end of each fetch.
+// Results are swapped in under a lock only at the end of each fetch.
 #include "space.h"
 #include "ca_certs.h"
-#include "psram_json.h"
+#include "mem_util.h"
+#include "net_http.h"
+#include "powerwall.h"
+#include "shared_state.h"
+#include "time_util.h"
+#include <Arduino.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <esp_heap_caps.h>
 #include <src/libs/tjpgd/tjpgd.h> // LVGL's bundled TJpgDec (LV_USE_TJPGD 1; JD_FORMAT 0 = RGB888, no scaling)
 
 namespace {
-
-constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
-constexpr uint32_t READ_TIMEOUT_MS = 5000;
-constexpr uint32_t HANDSHAKE_TIMEOUT_S = 5;
-constexpr uint32_t BODY_DEADLINE_MS = 8000;   // whole-body deadline for the small SWPC files
-constexpr uint32_t IMAGE_DEADLINE_MS = 25000; // whole-body deadline for the JPEG
-constexpr const char *USER_AGENT = "powerwall-display/1.0 (personal ESP32 display; Figment Sieve Industries)";
 
 constexpr const char *SWPC = "https://services.swpc.noaa.gov";
 constexpr const char *SUN_URL = "https://soho.nascom.nasa.gov/data/realtime/hmi_igr/512/latest.jpg";
@@ -36,147 +30,16 @@ constexpr float DISC_CX = 0.500F;
 constexpr float DISC_CY = 0.499F;
 constexpr float DISC_R = 0.4635F;
 
-SunData s_sun;
+Shared<SunData> s_sun;
+// Sun image double buffer: the front index, version and time change together under s_imgLock
+Mutex s_imgLock;
 uint16_t *s_img[2] = {nullptr, nullptr};
 int s_front = -1;
 uint32_t s_version = 0;
 time_t s_takenAt = 0;
 
-SemaphoreHandle_t lock() {
-    static SemaphoreHandle_t m = xSemaphoreCreateMutex(); // created on first use (thread-safe static init)
-    return m;
-}
-
-struct Guard {
-    Guard() { xSemaphoreTake(lock(), portMAX_DELAY); }
-    ~Guard() { xSemaphoreGive(lock()); }
-    Guard(const Guard &) = delete;
-    Guard &operator=(const Guard &) = delete;
-};
-
-// malloc'd block freed on scope exit
-struct Mem {
-    void *p = nullptr;
-    Mem() = default;
-    Mem(const Mem &) = delete;
-    Mem &operator=(const Mem &) = delete;
-    ~Mem() {
-        if (p) heap_caps_free(p);
-    }
-    void *psram(size_t n, bool zero = false) {
-        p = zero ? heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-                 : heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        return p;
-    }
-    void *internal(size_t n, bool zero = false) {
-        p = zero ? heap_caps_calloc(1, n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-                 : heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        return p;
-    }
-};
-
-// days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's days_from_civil)
-int64_t daysFromCivil(int y, unsigned m, unsigned d) {
-    y -= m <= 2;
-    const int64_t era = (y >= 0 ? y : y - 399) / 400;
-    const unsigned yoe = (unsigned)(y - era * 400);
-    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + (int64_t)doe - 719468;
-}
-
-// SWPC "2026-10-11T10:38:00Z" (UTC) -> time_t, 0 if it doesn't parse
-time_t parseIso(const char *s) {
-    int y = 0, mo = 0, d = 0, h = 0, mi = 0, sec = 0;
-    if (!s || sscanf(s, "%4d-%2d-%2dT%2d:%2d:%2d", &y, &mo, &d, &h, &mi, &sec) < 5) return 0;
-    return (time_t)(daysFromCivil(y, (unsigned)mo, (unsigned)d) * 86400 + h * 3600 + mi * 60 + sec);
-}
-
-// HTTP date "Sun, 11 Oct 2026 10:56:05 GMT" -> time_t (UTC), 0 if it doesn't parse
-time_t parseHttpDate(const char *s) {
-    static const char *const MONTHS[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    if (!s || !*s) return 0;
-    const char *comma = strchr(s, ',');
-    const char *p = comma ? comma + 1 : s;
-    int d = 0, y = 0, h = 0, mi = 0, sec = 0;
-    char mon[4] = {};
-    if (sscanf(p, " %2d %3s %4d %2d:%2d:%2d", &d, mon, &y, &h, &mi, &sec) != 6) return 0;
-    for (int m = 0; m < 12; m++) {
-        if (strncasecmp(mon, MONTHS[m], 3) == 0)
-            return (time_t)(daysFromCivil(y, (unsigned)(m + 1), (unsigned)d) * 86400 + h * 3600 + mi * 60 + sec);
-    }
-    return 0;
-}
-
-void copyStr(char *dst, size_t n, const char *src) {
-    snprintf(dst, n, "%.*s", (int)(n - 1), src ? src : "");
-}
-
 // ---------------------------------------------------------------------------------------------
-// SWPC fetching
-
-enum class Get { Ok, HttpError, NetError };
-
-// GET path on the shared connection into buf (NUL-terminated). The body is read from the stream by
-// Content-Length (SWPC sends it); an unknown length (chunked) falls back to getString(), which de-chunks.
-Get swpcGet(HTTPClient &http, WiFiClientSecure &client, const char *path, char *buf, size_t cap, size_t &len) {
-    char url[96];
-    snprintf(url, sizeof(url), "%s%s", SWPC, path);
-    len = 0;
-    if (!http.begin(client, url)) return Get::NetError;
-    http.setReuse(true); // keep-alive: one TLS handshake for all the files
-    http.setUserAgent(USER_AGENT);
-    http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-    http.setTimeout(READ_TIMEOUT_MS);
-    const int code = http.GET();
-    if (code != 200) {
-        Serial.printf("Space: %s -> %s\n", path, code < 0 ? HTTPClient::errorToString(code).c_str() : String(code).c_str());
-        http.end();
-        if (code < 0) {
-            client.stop();
-            return Get::NetError;
-        }
-        return Get::HttpError;
-    }
-    bool ok = false;
-    const int size = http.getSize();
-    if (size >= 0) {
-        if ((size_t)size < cap) {
-            WiFiClient *s = http.getStreamPtr();
-            const uint32_t deadline = millis() + BODY_DEADLINE_MS;
-            size_t n = 0;
-            while (n < (size_t)size && (int32_t)(millis() - deadline) < 0) {
-                const int avail = s->available();
-                if (avail > 0) {
-                    const int r = s->read((uint8_t *)buf + n, (size_t)avail < (size_t)size - n ? (size_t)avail : (size_t)size - n);
-                    if (r > 0) n += (size_t)r;
-                } else if (!s->connected()) {
-                    break;
-                } else {
-                    delay(2);
-                }
-            }
-            len = n;
-            ok = n == (size_t)size;
-        }
-    } else {
-        String body = http.getString();
-        if (body.length() < cap) {
-            memcpy(buf, body.c_str(), body.length());
-            len = body.length();
-            ok = len > 0;
-        }
-    }
-    buf[len] = '\0';
-    http.end();
-    if (!ok) {
-        Serial.printf("Space: %s body incomplete (%u of %d B)\n", path, (unsigned)len, size);
-        client.stop(); // the connection state is unknown, don't reuse it
-        return Get::HttpError;
-    }
-    return Get::Ok;
-}
+// SWPC parsing
 
 // NOAA scale value: strings like "0" in the data, null in forecast rows; -1 = unknown
 int scaleOf(JsonVariantConst v) {
@@ -225,8 +88,8 @@ bool parseFlares(const char *buf, size_t len, SunData &d) {
     if (!*cur) return false;
     copyStr(d.flareNow, sizeof(d.flareNow), cur);
     copyStr(d.flareMax, sizeof(d.flareMax), e["max_class"] | "");
-    d.flareMaxAt = parseIso(e["max_time"] | "");
-    d.updatedAt = parseIso(e["time_tag"] | "");
+    d.flareMaxAt = tu::parseIso8601(e["max_time"] | "");
+    d.updatedAt = tu::parseIso8601(e["time_tag"] | "");
     return true;
 }
 
@@ -395,14 +258,20 @@ void buildLut(uint16_t lut[256]) {
     }
 }
 
-// Decoder state (heap, not on the task stack)
+/// Decoder state (heap, not on the task stack). The area average is accumulated in a small band of
+// output rows (internal RAM): TJpgDec delivers MCUs in raster order, so once an MCU row starts at
+// source row `top`, every output row above top's has all its pixels and is written out (as average
+// luminance) to the PSRAM image in one sequential pass.
 struct SunDecode {
     JDEC jd;
     const uint8_t *src;
     size_t len;
     size_t pos;
-    uint16_t *sum; // IMG_PIXELS: sum of luminance of the source pixels falling in each output cell
-    uint8_t *cnt;  // IMG_PIXELS: number of source pixels in each cell
+    uint16_t *out;     // IMG_PIXELS: average luminance per output cell (0 = no source pixels)
+    uint16_t *bandSum; // bandRows x SUN_IMG_PX: luminance sums of the output rows in progress (ring)
+    uint8_t *bandCnt;  // bandRows x SUN_IMG_PX: source pixels per cell
+    int bandRows;
+    int doneRows;      // output rows < doneRows are final in `out`
     uint8_t xmap[JD_MAX_DIM]; // source column -> output column
     int height;
 };
@@ -416,16 +285,33 @@ size_t jdIn(JDEC *jd, uint8_t *out, size_t n) {
     return n;
 }
 
+// Writes output rows [doneRows, upTo) to c->out and clears their band slots
+void flushRows(SunDecode *c, int upTo) {
+    for (; c->doneRows < upTo; c->doneRows++) {
+        const int slot = (c->doneRows % c->bandRows) * SUN_IMG_PX;
+        uint16_t *dst = c->out + c->doneRows * SUN_IMG_PX;
+        for (int x = 0; x < SUN_IMG_PX; x++) {
+            const uint8_t n = c->bandCnt[slot + x];
+            dst[x] = n ? (uint16_t)(c->bandSum[slot + x] / n) : 0;
+        }
+        memset(c->bandSum + slot, 0, SUN_IMG_PX * sizeof(uint16_t));
+        memset(c->bandCnt + slot, 0, SUN_IMG_PX);
+    }
+}
+
 int jdOut(JDEC *jd, void *bitmap, JRECT *rect) {
     SunDecode *c = (SunDecode *)jd->device;
     const uint8_t *px = (const uint8_t *)bitmap; // RGB888, rows of (right-left+1) pixels
     const int w = rect->right - rect->left + 1;
+    flushRows(c, rect->top * SUN_IMG_PX / c->height);
+    const int last = (rect->bottom < c->height ? rect->bottom : c->height - 1) * SUN_IMG_PX / c->height;
+    if (last - c->doneRows >= c->bandRows) return 0; // band too small (can't happen for baseline JPEGs): abort
     for (int y = rect->top; y <= rect->bottom && y < c->height; y++) {
-        const int base = (y * SUN_IMG_PX / c->height) * SUN_IMG_PX;
+        const int base = ((y * SUN_IMG_PX / c->height) % c->bandRows) * SUN_IMG_PX;
         for (int x = 0; x < w; x++, px += 3) {
             const int idx = base + c->xmap[rect->left + x];
-            c->sum[idx] = (uint16_t)(c->sum[idx] + ((px[0] * 77 + px[1] * 151 + px[2] * 28) >> 8));
-            c->cnt[idx]++;
+            c->bandSum[idx] = (uint16_t)(c->bandSum[idx] + ((px[0] * 77 + px[1] * 151 + px[2] * 28) >> 8));
+            c->bandCnt[idx]++;
         }
     }
     return 1;
@@ -434,33 +320,42 @@ int jdOut(JDEC *jd, void *bitmap, JRECT *rect) {
 bool ensureImageBuffers() {
     if (s_img[0] && s_img[1]) return true;
     for (auto &b : s_img) {
-        if (!b) b = (uint16_t *)heap_caps_malloc(IMG_PIXELS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!b) b = static_cast<uint16_t *>(psramAlloc(IMG_PIXELS * sizeof(uint16_t)));
     }
     if (s_img[0] && s_img[1]) return true;
     Serial.println("Space: no PSRAM for the sun image");
     return false;
 }
 
-// Area-average the decoded picture into dst (SUN_IMG_PX^2 RGB565) and tint it, black outside the disc
-void tintImage(const SunDecode *c, uint16_t *dst) {
+// Tint the averaged luminance in img (SUN_IMG_PX^2) into RGB565 in place: black outside the solar
+// disc, and SUN_IMG_BG_RGB565 at radius >= SUN_IMG_PX / 2 from the image centre (the round holder's
+// corners, so the screen needs no clip_corner layer).
+void tintImage(uint16_t *img) {
     const float cx = SUN_IMG_PX * DISC_CX;
     const float cy = SUN_IMG_PX * DISC_CY;
     const float ro = SUN_IMG_PX * DISC_R;
     const float ro2 = ro * ro;
+    const float hc = SUN_IMG_PX * 0.5F; // holder circle: centre and radius
+    const float hr2 = hc * hc;
     uint32_t hist[256] = {};
     uint32_t discCells = 0;
-    // pass 1: average luminance per cell (0 outside the disc), histogram of the disc
+    // pass 1: mask (0 outside the disc, background in the corners), histogram of the disc
     for (int oy = 0; oy < SUN_IMG_PX; oy++) {
         const float dy = (float)oy + 0.5F - cy;
+        const float hy = (float)oy + 0.5F - hc;
         for (int ox = 0; ox < SUN_IMG_PX; ox++) {
             const int idx = oy * SUN_IMG_PX + ox;
             const float dx = (float)ox + 0.5F - cx;
-            if (dx * dx + dy * dy > ro2 || c->cnt[idx] == 0) {
-                dst[idx] = 0;
+            const float hx = (float)ox + 0.5F - hc;
+            if (hx * hx + hy * hy >= hr2) {
+                img[idx] = SUN_IMG_BG_RGB565;
                 continue;
             }
-            const uint32_t lum = c->sum[idx] / c->cnt[idx];
-            dst[idx] = (uint16_t)lum;
+            if (dx * dx + dy * dy > ro2) {
+                img[idx] = 0;
+                continue;
+            }
+            const uint32_t lum = img[idx] > 255 ? 255 : img[idx];
             hist[lum]++;
             discCells++;
         }
@@ -477,57 +372,60 @@ void tintImage(const SunDecode *c, uint16_t *dst) {
     if (ref < 24) ref = 24;
     uint16_t lut[256];
     buildLut(lut);
-    // pass 2: brightness -> colour
+    // pass 2: brightness -> colour (the corners are > 255 and stay as they are; 0 stays black)
     for (int i = 0; i < IMG_PIXELS; i++) {
-        const uint32_t v = dst[i];
-        if (v == 0) continue;
+        const uint32_t v = img[i];
+        if (v == 0 || v > 255) continue;
         uint32_t t = v * REF_T / ref;
         if (t > 255) t = 255;
-        dst[i] = lut[t];
+        img[i] = lut[t];
     }
 }
 
+static_assert(SUN_IMG_BG_RGB565 > 255, "the background marker must not collide with a luminance value");
+
 } // namespace
 
-SunData sunData() {
-    Guard g;
-    return s_sun;
-}
+SunData sunData() { return s_sun.get(); }
 
 const uint16_t *sunImage(uint32_t &version, time_t &takenAt) {
-    Guard g;
+    LockGuard g(s_imgLock);
     version = s_version;
     takenAt = s_takenAt;
     return s_front >= 0 ? s_img[s_front] : nullptr;
 }
 
 bool spaceFetchSwpc() {
-    Mem bufMem;
-    char *buf = (char *)bufMem.psram(SWPC_BUF);
-    if (!buf) {
+    HeapBuf bufMem;
+    if (!bufMem.psram(SWPC_BUF)) {
         Serial.println("Space: no PSRAM for the SWPC buffer");
         return false;
     }
+    char *buf = bufMem.as<char>();
     SunData d = sunData(); // start from the previous values so a failed file keeps its old numbers
-    bool gotScales = false, gotFlares = false, gotAny = false, net = true;
+    bool gotScales = false, gotFlares = false, gotAny = false;
     {
-        WiFiClientSecure client;
-        client.setCACert(NOAA_CA);
-        client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
-        HTTPClient http;
+        net::Options o;
+        o.tag = "Space";
+        o.ca = NOAA_CA;
+        o.keepAlive = true; // one TLS handshake for all the files
+        o.budgetMs = PW_JOB_BUDGET_MS;
+        net::Session s(o);
         size_t len = 0;
         auto get = [&](const char *path) -> bool {
-            if (!net) return false; // connection failed earlier: don't wait for more timeouts
-            const Get r = swpcGet(http, client, path, buf, SWPC_BUF, len);
-            if (r == Get::NetError) net = false;
-            return r == Get::Ok;
+            if (!s.usable()) return false; // connection failed or budget spent: don't wait for more timeouts
+            char url[96];
+            snprintf(url, sizeof(url), "%s%s", SWPC, path);
+            net::Response r;
+            if (s.get(url, buf, SWPC_BUF, &r) != net::Result::Ok) return false;
+            len = r.len;
+            return true;
         };
         if (get("/products/noaa-scales.json")) gotScales = parseScales(buf, len, d);
         if (get("/json/goes/primary/xray-flares-latest.json")) gotFlares = parseFlares(buf, len, d);
         if (get("/products/geospace/propagated-solar-wind-1-hour.json")) gotAny |= parseWind(buf, len, d);
         if (get("/json/solar_probabilities.json")) gotAny |= parseProbabilities(buf, len, d);
         if (get("/text/daily-solar-indices.txt")) gotAny |= parseIndices(buf, len, d);
-        client.stop();
     }
     const bool fresh = gotScales && gotFlares;
     if (!fresh && !gotScales && !gotFlares && !gotAny) {
@@ -538,10 +436,7 @@ bool spaceFetchSwpc() {
         d.valid = true;
         d.fetchedMs = millis();
     }
-    {
-        Guard g;
-        s_sun = d;
-    }
+    s_sun.set(d);
     if (!fresh) {
         Serial.printf("Space: partial SWPC fetch (scales %d, flares %d)\n", gotScales, gotFlares);
         return false;
@@ -558,64 +453,32 @@ bool spaceFetchSunImage() {
     if (!ensureImageBuffers()) return false;
 
     // ---- download the JPEG into PSRAM ----
-    Mem jpgMem;
-    uint8_t *jpg = nullptr;
+    HeapBuf jpgMem;
+    if (!jpgMem.psram(JPEG_MAX + 1)) { // + the NUL net::Session::get() appends
+        Serial.println("Space: no PSRAM for the sun JPEG");
+        return false;
+    }
+    const uint8_t *jpg = jpgMem.as<const uint8_t>();
     size_t jpgLen = 0;
     time_t takenAt = 0;
     {
-        WiFiClientSecure client;
-        client.setCACert(OPEN_METEO_CA); // ISRG Root X1 + YR (Let's Encrypt), same chain as soho.nascom.nasa.gov
-        client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
-        HTTPClient http;
-        if (!http.begin(client, SUN_URL)) return false;
-        http.setReuse(false);
-        http.setUserAgent(USER_AGENT);
-        http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        http.setTimeout(READ_TIMEOUT_MS);
-        http.useHTTP10(true); // no chunked encoding: the body is the JPEG, ended by Content-Length or close
-        const char *keys[] = {"Last-Modified"};
-        http.collectHeaders(keys, 1);
-        const int code = http.GET();
-        if (code != 200) {
-            Serial.printf("Space: sun image -> %s\n", code < 0 ? HTTPClient::errorToString(code).c_str() : String(code).c_str());
-            http.end();
+        net::Options o;
+        o.tag = "Space";
+        o.ca = LETS_ENCRYPT_CA; // ISRG Root X1 + YR, the chain of soho.nascom.nasa.gov
+        o.budgetMs = PW_JOB_BUDGET_MS;
+        o.bodyDeadlineMs = PW_JOB_BUDGET_MS; // clamped to what is left of the budget
+        net::Session s(o);                   // HTTP/1.0: the body is the JPEG, ended by Content-Length or close
+        net::Request q;
+        q.lastModified = true;
+        net::Response r;
+        if (s.get(SUN_URL, jpgMem.as<char>(), jpgMem.size, &r, q) != net::Result::Ok) return false;
+        jpgLen = r.len;
+        takenAt = r.lastModified;
+        if (r.contentLength < 0 && jpgLen < 1024) {
+            Serial.printf("Space: sun image incomplete (%u B)\n", (unsigned)jpgLen);
             return false;
         }
-        const int size = http.getSize();
-        if (size > (int)JPEG_MAX) {
-            Serial.printf("Space: sun image too big (%d B)\n", size);
-            http.end();
-            return false;
-        }
-        const size_t want = size > 0 ? (size_t)size : JPEG_MAX; // unknown length: read until the server closes
-        jpg = (uint8_t *)jpgMem.psram(want);
-        if (!jpg) {
-            Serial.println("Space: no PSRAM for the sun JPEG");
-            http.end();
-            return false;
-        }
-        takenAt = parseHttpDate(http.header("Last-Modified").c_str());
-        WiFiClient *s = http.getStreamPtr();
-        const uint32_t deadline = millis() + IMAGE_DEADLINE_MS;
-        while (jpgLen < want && (int32_t)(millis() - deadline) < 0) {
-            const int avail = s->available();
-            if (avail > 0) {
-                const size_t room = want - jpgLen;
-                const int r = s->read(jpg + jpgLen, (size_t)avail < room ? (size_t)avail : room);
-                if (r > 0) jpgLen += (size_t)r;
-            } else if (!s->connected()) {
-                break;
-            } else {
-                delay(2);
-            }
-        }
-        http.end();
-        client.stop(); // free the TLS buffers before decoding
-        if (size > 0 ? jpgLen != (size_t)size : jpgLen < 1024) {
-            Serial.printf("Space: sun image incomplete (%u of %d B)\n", (unsigned)jpgLen, size);
-            return false;
-        }
-    }
+    } // TLS buffers freed before decoding
     if (jpgLen < 4 || jpg[0] != 0xFF || jpg[1] != 0xD8) {
         Serial.println("Space: sun image is not a JPEG");
         return false;
@@ -623,18 +486,15 @@ bool spaceFetchSunImage() {
 
     // ---- decode and area-average to SUN_IMG_PX ----
     const uint32_t t0 = millis();
-    Mem ctxMem, poolMem, accMem;
-    SunDecode *c = (SunDecode *)ctxMem.internal(sizeof(SunDecode), true);
-    void *pool = poolMem.internal(JD_POOL);
-    uint8_t *acc = (uint8_t *)accMem.psram(IMG_PIXELS * (sizeof(uint16_t) + sizeof(uint8_t)), true);
-    if (!c || !pool || !acc) {
+    HeapBuf ctxMem, poolMem, bandMem;
+    SunDecode *c = static_cast<SunDecode *>(ctxMem.internal(sizeof(SunDecode), true) ? ctxMem.p : nullptr);
+    void *pool = poolMem.internal(JD_POOL) ? poolMem.p : nullptr;
+    if (!c || !pool) {
         Serial.println("Space: no memory to decode the sun image");
         return false;
     }
     c->src = jpg;
     c->len = jpgLen;
-    c->sum = (uint16_t *)acc;
-    c->cnt = acc + IMG_PIXELS * sizeof(uint16_t);
     JRESULT jr = jd_prepare(&c->jd, jdIn, pool, JD_POOL, c);
     if (jr != JDR_OK) {
         Serial.printf("Space: sun JPEG prepare failed (%d; progressive or unsupported?)\n", (int)jr);
@@ -646,21 +506,32 @@ bool spaceFetchSunImage() {
     }
     c->height = c->jd.height;
     for (int x = 0; x < c->jd.width; x++) c->xmap[x] = (uint8_t)(x * SUN_IMG_PX / c->jd.width);
+    // Band: the output rows one MCU row (8 or 16 source rows) can touch, plus the row it shares
+    c->bandRows = c->jd.msy * 8 * SUN_IMG_PX / c->height + 2;
+    const size_t bandBytes = (size_t)c->bandRows * SUN_IMG_PX * (sizeof(uint16_t) + sizeof(uint8_t));
+    if (!bandMem.internal(bandBytes, true) && !bandMem.psram(bandBytes, true)) {
+        Serial.println("Space: no memory to decode the sun image");
+        return false;
+    }
+    c->bandSum = bandMem.as<uint16_t>();
+    c->bandCnt = bandMem.as<uint8_t>() + (size_t)c->bandRows * SUN_IMG_PX * sizeof(uint16_t);
+
+    int back;
+    {
+        LockGuard g(s_imgLock);
+        back = s_front == 0 ? 1 : 0; // the screen may still be showing the front buffer
+    }
+    c->out = s_img[back];
     jr = jd_decomp(&c->jd, jdOut, 0);
     if (jr != JDR_OK) {
         Serial.printf("Space: sun JPEG decode failed (%d)\n", (int)jr);
         return false;
     }
-
-    int back;
-    {
-        Guard g;
-        back = s_front == 0 ? 1 : 0; // the screen may still be showing the front buffer
-    }
-    tintImage(c, s_img[back]);
+    flushRows(c, SUN_IMG_PX);
+    tintImage(s_img[back]);
     const uint32_t ms = millis() - t0;
     {
-        Guard g;
+        LockGuard g(s_imgLock);
         s_front = back;
         s_version++;
         s_takenAt = takenAt;

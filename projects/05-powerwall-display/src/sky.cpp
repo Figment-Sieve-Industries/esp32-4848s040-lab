@@ -1,65 +1,47 @@
 // Aurora (AuroraWatch UK), Kp (NOAA SWPC) and moonrise/moonset (MET Norway) - see sky.h.
 // Called from the network task in powerwall.cpp, which schedules them (one TLS session at a time).
-// Results are swapped in under the lock only when a response parses completely.
+// Each fetch reads its body into a PSRAM buffer through a net::Session (HTTP/1.0, so no chunked
+// bodies) and swaps the result in only when the response parses completely.
 #include "sky.h"
 #include "ca_certs.h"
-#include "psram_json.h"
+#include "mem_util.h"
+#include "net_http.h"
+#include "powerwall.h"
 #include "secrets.h"
+#include "shared_state.h"
+#include "time_util.h"
+#include <Arduino.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
 
 namespace {
 
-constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;
-constexpr uint32_t READ_TIMEOUT_MS = 5000;
-constexpr uint32_t HANDSHAKE_TIMEOUT_S = 5;
-// AuroraWatch UK and MET Norway ask for an identifying User-Agent
-constexpr const char *USER_AGENT = "powerwall-display/1.0 (personal ESP32 display; Figment Sieve Industries)";
+constexpr size_t BODY_BUF = 32 * 1024; // the largest body (Kp, the AuroraWatch activity XML) is a few KB
 
-AuroraData s_aurora;
-KpData s_kp;
-MoonTimes s_moon;
+Shared<AuroraData> s_aurora;
+Shared<KpData> s_kp;
+Shared<MoonTimes> s_moon;
 
-SemaphoreHandle_t lock() {
-    static SemaphoreHandle_t m = xSemaphoreCreateMutex(); // created on first use (thread-safe static init)
-    return m;
+// AuroraWatch UK and MET Norway ask for an identifying User-Agent (net::USER_AGENT)
+net::Options options(const char *ca) {
+    net::Options o;
+    o.tag = "Sky";
+    o.ca = ca; // nullptr: plain HTTP (AuroraWatch)
+    o.budgetMs = PW_JOB_BUDGET_MS;
+    return o;
 }
 
-struct Guard {
-    Guard() { xSemaphoreTake(lock(), portMAX_DELAY); }
-    ~Guard() { xSemaphoreGive(lock()); }
-};
-
-// days since 1970-01-01 for a proleptic Gregorian date (H. Hinnant's days_from_civil)
-int64_t daysFromCivil(int y, unsigned m, unsigned d) {
-    y -= m <= 2;
-    const int64_t era = (y >= 0 ? y : y - 399) / 400;
-    const unsigned yoe = (unsigned)(y - era * 400);
-    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + (int64_t)doe - 719468;
+bool allocBody(HeapBuf &body) {
+    if (body.psram(BODY_BUF)) return true;
+    Serial.println("Sky: no PSRAM for the body");
+    return false;
 }
 
-// "2026-10-10T17:00:00+0000", "2026-10-11T08:23+01:00", "2026-10-04T00:00:00" (UTC if no offset).
-// Returns 0 if it doesn't parse.
-time_t parseIso(const char *s) {
-    int y, mo, d, h, mi, sec = 0, n = 0;
-    if (!s || sscanf(s, "%4d-%2d-%2dT%2d:%2d%n", &y, &mo, &d, &h, &mi, &n) != 5) return 0;
-    const char *p = s + n;
-    if (*p == ':') {
-        sec = atoi(p + 1);
-        p += 3;
-    }
-    int off = 0; // seconds east of UTC
-    if (*p == '+' || *p == '-') {
-        int sign = *p == '-' ? -1 : 1;
-        int oh = 0, om = 0;
-        if (sscanf(p + 1, "%2d:%2d", &oh, &om) != 2) sscanf(p + 1, "%2d%2d", &oh, &om);
-        off = sign * (oh * 3600 + om * 60);
-    }
-    return (time_t)(daysFromCivil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec - off);
+// One GET into body; false if it failed (logged by net::Session).
+bool get(net::Session &s, const char *url, HeapBuf &body, size_t &len) {
+    net::Response r;
+    if (s.get(url, body.as<char>(), body.size, &r) != net::Result::Ok) return false;
+    len = r.len;
+    return true;
 }
 
 AuroraLevel levelFrom(const char *id, size_t n) {
@@ -95,25 +77,6 @@ const char *tagText(const char *p, const char *tag, char *out, size_t n) {
     return b + strlen(close);
 }
 
-bool httpGet(WiFiClient &client, const char *url, String &body) { // WiFiClientSecure is one too
-    HTTPClient http;
-    if (!http.begin(client, url)) return false;
-    http.setReuse(false);
-    http.setUserAgent(USER_AGENT);
-    http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-    http.setTimeout(READ_TIMEOUT_MS);
-    // HTTP/1.0: no chunked transfer encoding (a chunked keep-alive response once stalled getString())
-    http.useHTTP10(true);
-    int code = http.GET();
-    if (code == 200) body = http.getString();
-    http.end();
-    if (code != 200) {
-        Serial.printf("Sky: %s -> %s\n", url, code < 0 ? HTTPClient::errorToString(code).c_str() : String(code).c_str());
-        return false;
-    }
-    return true;
-}
-
 } // namespace
 
 const char *auroraLevelName(AuroraLevel l) {
@@ -137,23 +100,22 @@ uint32_t auroraLevelColor(AuroraLevel l) {
 }
 
 bool skyFetchAurora() {
-    WiFiClient client;
-    String status, activity;
-    if (!httpGet(client, "http://aurorawatch-api.lancs.ac.uk/0.2/status/current-status.xml", status)) return false;
-    client.stop();
-    if (!httpGet(client, "http://aurorawatch-api.lancs.ac.uk/0.2/status/alerting-site-activity.xml", activity))
-        return false;
-    client.stop();
-
+    HeapBuf body;
+    if (!allocBody(body)) return false;
+    net::Session s(options(nullptr));
+    size_t len = 0;
     AuroraData a;
-    const char *s = status.c_str();
-    const char *site = strstr(s, "<site_status");
-    a.level = site ? levelAttr(site, s + status.length()) : AuroraLevel::Unknown;
+    if (!get(s, "http://aurorawatch-api.lancs.ac.uk/0.2/status/current-status.xml", body, len)) return false;
+    const char *st = body.as<const char>();
+    const char *site = strstr(st, "<site_status");
+    a.level = site ? levelAttr(site, st + len) : AuroraLevel::Unknown;
     char buf[40];
-    if (tagText(s, "datetime", buf, sizeof(buf))) a.updatedAt = parseIso(buf);
+    if (tagText(st, "datetime", buf, sizeof(buf))) a.updatedAt = tu::parseIso8601(buf);
 
-    const char *p = activity.c_str();
-    const char *end = p + activity.length();
+    if (!get(s, "http://aurorawatch-api.lancs.ac.uk/0.2/status/alerting-site-activity.xml", body, len)) return false;
+    s.close();
+    const char *p = body.as<const char>();
+    const char *end = p + len;
     // Lower thresholds: <lower_threshold status_id="yellow">50</lower_threshold>
     for (const char *t = strstr(p, "<lower_threshold"); t; t = strstr(t + 1, "<lower_threshold")) {
         AuroraLevel l = levelAttr(t, end);
@@ -170,7 +132,7 @@ bool skyFetchAurora() {
         char dt[40], val[16];
         if (!tagText(t, "datetime", dt, sizeof(dt)) || !tagText(t, "value", val, sizeof(val))) break;
         int i = total % 24; // ring buffer of the newest 24
-        all.activityHour[i] = parseIso(dt);
+        all.activityHour[i] = tu::parseIso8601(dt);
         all.activityNt[i] = (float)atof(val);
         all.activityLevel[i] = levelAttr(t, close);
         total++;
@@ -190,29 +152,28 @@ bool skyFetchAurora() {
     }
     a.valid = true;
     a.fetchedMs = millis();
-    {
-        Guard g;
-        s_aurora = a;
-    }
+    s_aurora.set(a);
     Serial.printf("Sky: aurora %s, last hour %.1f nT\n", auroraLevelName(a.level), a.activityNt[a.count - 1]);
     return true;
 }
 
 bool skyFetchKp() {
-    WiFiClientSecure client;
-    client.setCACert(NOAA_CA);
-    client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
-    String body;
-    bool ok = httpGet(client, "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json", body);
-    client.stop();
-    if (!ok) return false;
+    HeapBuf body;
+    if (!allocBody(body)) return false;
+    size_t len = 0;
+    {
+        net::Session s(options(NOAA_CA));
+        if (!get(s, "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json", body, len))
+            return false;
+    }
 
     JsonDocument filter(psramJson());
     filter[0]["time_tag"] = true;
     filter[0]["kp"] = true;
     filter[0]["observed"] = true;
     JsonDocument doc(psramJson());
-    if (deserializeJson(doc, body, DeserializationOption::Filter(filter)) || !doc.is<JsonArray>()) {
+    if (deserializeJson(doc, body.as<const char>(), len, DeserializationOption::Filter(filter)) ||
+        !doc.is<JsonArray>()) {
         Serial.println("Sky: Kp response did not parse");
         return false;
     }
@@ -223,7 +184,7 @@ bool skyFetchKp() {
     time_t nowKpAt = 0;
     int filled = 0;
     for (JsonObject e : doc.as<JsonArray>()) {
-        time_t t = parseIso(e["time_tag"] | "");
+        time_t t = tu::parseIso8601(e["time_tag"] | "");
         if (!t || !e["kp"].is<float>()) continue;
         float kp = e["kp"];
         const char *kind = e["observed"] | "";
@@ -247,10 +208,7 @@ bool skyFetchKp() {
     }
     k.valid = true;
     k.fetchedMs = millis();
-    {
-        Guard g;
-        s_kp = k;
-    }
+    s_kp.set(k);
     Serial.printf("Sky: Kp now %.2f, %d slots\n", k.nowKp, filled);
     return true;
 }
@@ -259,37 +217,31 @@ bool skyMoonNeeded() {
     time_t now = time(nullptr);
     struct tm lt;
     localtime_r(&now, &lt);
-    Guard g;
-    return !s_moon.valid || s_moon.year != lt.tm_year || s_moon.yday != lt.tm_yday;
+    const MoonTimes m = s_moon.get();
+    return !m.valid || m.year != lt.tm_year || m.yday != lt.tm_yday;
 }
 
 bool skyFetchMoon() {
     time_t now = time(nullptr);
-    struct tm lt, ut;
+    struct tm lt;
     localtime_r(&now, &lt);
-    gmtime_r(&now, &ut);
-    // Local UTC offset (UK: +00:00 or +01:00), from the difference of the two calendar readings
-    int64_t localSec = daysFromCivil(lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday) * 86400 + lt.tm_hour * 3600 +
-                       lt.tm_min * 60;
-    int64_t utcSec = daysFromCivil(ut.tm_year + 1900, ut.tm_mon + 1, ut.tm_mday) * 86400 + ut.tm_hour * 3600 +
-                     ut.tm_min * 60;
-    int offMin = (int)((localSec - utcSec) / 60);
+    const int offMin = tu::utcOffsetMinutes(now); // UK: +00:00 or +01:00
     char url[200];
     // MET Norway: at most 4 decimals of position
     snprintf(url, sizeof(url),
              "https://api.met.no/weatherapi/sunrise/3.0/moon?lat=%.4f&lon=%.4f&date=%04d-%02d-%02d&offset=%c%02d:%02d",
              (double)WEATHER_LAT, (double)WEATHER_LON, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday,
              offMin < 0 ? '-' : '+', abs(offMin) / 60, abs(offMin) % 60);
-    WiFiClientSecure client;
-    client.setCACert(MET_NO_CA);
-    client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
-    String body;
-    bool ok = httpGet(client, url, body);
-    client.stop();
-    if (!ok) return false;
+    HeapBuf body;
+    if (!allocBody(body)) return false;
+    size_t len = 0;
+    {
+        net::Session s(options(MET_NO_CA));
+        if (!get(s, url, body, len)) return false;
+    }
 
     JsonDocument doc(psramJson());
-    if (deserializeJson(doc, body) || !doc["properties"].is<JsonObject>()) {
+    if (deserializeJson(doc, body.as<const char>(), len) || !doc["properties"].is<JsonObject>()) {
         Serial.println("Sky: moon response did not parse");
         return false;
     }
@@ -297,32 +249,20 @@ bool skyFetchMoon() {
     MoonTimes m;
     m.year = lt.tm_year;
     m.yday = lt.tm_yday;
-    m.rise = parseIso(p["moonrise"]["time"] | ""); // null -> "" -> 0 (no moonrise that day)
-    m.set = parseIso(p["moonset"]["time"] | "");
+    m.rise = tu::parseIso8601(p["moonrise"]["time"] | ""); // null -> "" -> 0 (no moonrise that day)
+    m.set = tu::parseIso8601(p["moonset"]["time"] | "");
     m.riseAzDeg = p["moonrise"]["azimuth"] | -1.0f;
     m.setAzDeg = p["moonset"]["azimuth"] | -1.0f;
     m.valid = true;
     m.fetchedMs = millis();
-    {
-        Guard g;
-        s_moon = m;
-    }
+    s_moon.set(m);
     Serial.printf("Sky: moonrise %s, moonset %s\n", (const char *)(p["moonrise"]["time"] | "--"),
                   (const char *)(p["moonset"]["time"] | "--"));
     return true;
 }
 
-AuroraData auroraData() {
-    Guard g;
-    return s_aurora;
-}
+AuroraData auroraData() { return s_aurora.get(); }
 
-KpData kpData() {
-    Guard g;
-    return s_kp;
-}
+KpData kpData() { return s_kp.get(); }
 
-MoonTimes moonTimes() {
-    Guard g;
-    return s_moon;
-}
+MoonTimes moonTimes() { return s_moon.get(); }

@@ -15,9 +15,23 @@
 #endif
 
 // Gateway data older than this is treated as stale by the UI and by energy.cpp ("--" / dimmed).
-// Must tolerate one weather fetch, which holds the TLS lock and pauses gateway polling
-// (bounded to ~13 s by the timeouts in fetchWeather) plus the reconnect afterwards.
+// Must tolerate one background job, which pauses gateway polling on the single network task, plus
+// the poll interval and the gateway reconnect afterwards.
 constexpr uint32_t PW_STALE_MS = 20000;
+
+// Time budget of one background job (net::Options::budgetMs in every fetcher): once spent, the job's
+// remaining requests are skipped (retried next period) and each phase of a request in flight is
+// clamped to what is left (at least 1 s). A job can still overrun by about one request's phase floors.
+constexpr uint32_t PW_JOB_BUDGET_MS = 12000;
+static_assert(PW_JOB_BUDGET_MS + 2000 /*poll*/ + 3000 /*overrun + reconnect*/ <= PW_STALE_MS,
+              "a background job must not make the live data stale");
+
+// 1: keep the gateway's TLS connection open across polls (HTTP/1.1 keep-alive for /aggregates, bodies
+// de-chunked by net::readBody), so there is no handshake every 2 s. 0 (default until soak-tested):
+// /aggregates is HTTP/1.0 and closes the connection, one handshake per poll.
+#ifndef PW_GW_KEEPALIVE
+#define PW_GW_KEEPALIVE 0
+#endif
 
 // Weather older than this is treated as stale by the UI ("--" / dimmed).
 constexpr uint32_t WEATHER_STALE_MS = 60UL * 60UL * 1000UL;
@@ -69,8 +83,8 @@ struct NetStatus {
     int rssi = 0;
 };
 
-// Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS), the gateway polling task and the weather task
-// (both on core 0; one TLS session at a time).
+// Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS) and the network task on core 0: gateway polling plus
+// the background jobs (weather, sky, space, ENSO), one TLS session at a time.
 void powerwallStart(uint32_t pollMs = 2000);
 
 // Thread-safe copies of the latest state.

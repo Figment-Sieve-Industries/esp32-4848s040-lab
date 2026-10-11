@@ -1,23 +1,24 @@
 // El Nino / ENSO from NOAA CPC - see enso.h and docs/11-space-weather-and-climate-data.md section 3.
-// One WiFiClientSecure + HTTPClient with keep-alive for five requests:
+// One keep-alive net::Session for five requests:
 //   ensodisc.shtml (whole page, streamed through a tag stripper; the odds and the next-update date sit
 //   beyond byte 8192), then the tails of wksst9120.for, sstoi.indices, oni.ascii.txt and RONI.ascii.txt.
 // Results are merged into a copy of the current data and swapped in under the lock, so a part that fails
 // to download or parse keeps its previous value. The parsers are plain C++ (no Arduino types) and are
-// tested on the real payloads on the host with -DENSO_HOST_TEST (the Arduino half is compiled out).
+// tested on real payloads on the host (hosttest/, builds this file with -DENSO_HOST_TEST, which
+// compiles the Arduino half out).
 #include "enso.h"
-#include <ctype.h>
+#include "mem_util.h"
+#include "time_util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef ENSO_HOST_TEST
 #include "ca_certs.h"
+#include "net_http.h"
+#include "powerwall.h"
+#include "shared_state.h"
 #include <Arduino.h>
-#include <HTTPClient.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <esp_heap_caps.h>
 #endif
 
 namespace {
@@ -43,36 +44,13 @@ const char *ciFind(const char *h, const char *needle, const char *end = nullptr)
     return nullptr;
 }
 
-// Copy n chars of src into dst (capacity cap), NUL-terminated
-void copyN(char *dst, size_t cap, const char *src, size_t n) {
-    if (cap == 0) return;
-    if (n > cap - 1) n = cap - 1;
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
-
 const char *skipSp(const char *p) {
     while (*p == ' ' || *p == '\t') ++p;
     return p;
 }
 
-constexpr const char *MONTH_NAMES[12] = {"January", "February", "March",     "April",   "May",      "June",
-                                         "July",    "August",   "September", "October", "November", "December"};
 constexpr const char *MONTH_LETTERS = "JFMAMJJASOND";
 constexpr const char *SEASON_RING = "JFMAMJJASONDJFMAMJJASOND";
-
-// "September", "sep", "Nov" -> 0..11, otherwise -1. Accepts the full name or the 3-letter abbreviation.
-int monthFromWord(const char *w, size_t n) {
-    if (n < 3) return -1;
-    for (int m = 0; m < 12; m++) {
-        const char *name = MONTH_NAMES[m];
-        if (n != 3 && n != strlen(name)) continue;
-        size_t i = 0;
-        while (i < n && lc(w[i]) == lc(name[i])) ++i;
-        if (i == n) return m;
-    }
-    return -1;
-}
 
 // "SON" or "September-November," or "Nov-Jan" -> 3-letter season code. Trailing/leading punctuation is ignored.
 bool seasonWord(const char *w, size_t n, char out[4]) {
@@ -85,7 +63,7 @@ bool seasonWord(const char *w, size_t n, char out[4]) {
         if (!isUp(w[0]) || !isUp(w[1]) || !isUp(w[2])) return false;
         for (int i = 0; i < 12; i++) {
             if (!strncmp(SEASON_RING + i, w, 3)) {
-                copyN(out, 4, w, 3);
+                copyStr(out, 4, w, 3);
                 return true;
             }
         }
@@ -93,8 +71,8 @@ bool seasonWord(const char *w, size_t n, char out[4]) {
     }
     const char *dash = (const char *)memchr(w, '-', n);
     if (!dash) return false;
-    const int a = monthFromWord(w, (size_t)(dash - w));
-    const int b = monthFromWord(dash + 1, (size_t)(w + n - dash - 1));
+    const int a = tu::monthFromName(w, (size_t)(dash - w));
+    const int b = tu::monthFromName(dash + 1, (size_t)(w + n - dash - 1));
     if (a < 0 || b < 0 || ((b - a + 12) % 12) != 2) return false; // exactly three months
     for (int k = 0; k < 3; k++) out[k] = MONTH_LETTERS[(a + k) % 12];
     out[3] = '\0';
@@ -323,14 +301,14 @@ void firstSentence(const char *p, char *out, size_t outCap) {
         n++;
     }
     if (n < outCap) {
-        copyN(out, outCap, p, n);
+        copyStr(out, outCap, p, n);
         return;
     }
     size_t cut = outCap - 4; // room for "..."
     while (cut > 0 && p[cut] != ' ') --cut;
     if (cut == 0) cut = outCap - 4;
     while (cut > 0 && (p[cut - 1] == ' ' || p[cut - 1] == ',')) --cut;
-    copyN(out, outCap, p, cut);
+    copyStr(out, outCap, p, cut);
     memcpy(out + cut, "...", 4); // cut <= outCap - 4, so "..." and the NUL fit
 }
 
@@ -344,7 +322,7 @@ bool parseAlert(const char *t, EnsoData &d) {
     if (n > sizeof(d.alertText) - 1) n = sizeof(d.alertText) - 1;
     while (n > 0 && s[n - 1] == ' ') --n;
     if (n == 0) return false;
-    copyN(d.alertText, sizeof(d.alertText), s, n);
+    copyStr(d.alertText, sizeof(d.alertText), s, n);
 
     const char *end = d.alertText + strlen(d.alertText);
     const bool nino = ciFind(d.alertText, "nino", end) != nullptr;
@@ -418,7 +396,7 @@ bool parseProbs(const char *t, EnsoData &d) {
     }
     char what[sizeof(d.probWhat)] = "";
     if (ciFind(sent, "historic", firstNum)) {
-        copyN(what, sizeof(what), "historic", 8);
+        copyStr(what, sizeof(what), "historic", 8);
         for (const char *i = sent; i + 3 < firstNum; ++i) { // "+2.5" threshold, if quoted
             if (*i == '+' && isDig(i[1]) && i[2] == '.' && isDig(i[3])) {
                 snprintf(what, sizeof(what), "historic (+%c.%c)", i[1], i[3]);
@@ -426,11 +404,11 @@ bool parseProbs(const char *t, EnsoData &d) {
             }
         }
     } else if (ciFind(sent, "very strong", firstNum)) {
-        copyN(what, sizeof(what), "very strong+", 12);
+        copyStr(what, sizeof(what), "very strong+", 12);
     } else if (ciFind(sent, "strong", firstNum)) {
-        copyN(what, sizeof(what), "strong+", 7);
+        copyStr(what, sizeof(what), "strong+", 7);
     } else if (ciFind(sent, "moderate", firstNum)) {
-        copyN(what, sizeof(what), "moderate+", 9);
+        copyStr(what, sizeof(what), "moderate+", 9);
     }
 
     d.probCount = count;
@@ -456,9 +434,9 @@ bool parseNextUpdate(const char *t, EnsoData &d) {
         const char *w = q + 1;
         const char *e = w;
         while (isAlpha(*e)) ++e;
-        const int m = monthFromWord(w, (size_t)(e - w));
+        const int m = tu::monthFromName(w, (size_t)(e - w));
         if (m < 0) continue;
-        snprintf(d.nextUpdate, sizeof(d.nextUpdate), "%d %.3s", atoi(p), MONTH_NAMES[m]);
+        snprintf(d.nextUpdate, sizeof(d.nextUpdate), "%d %.3s", atoi(p), tu::MONTH_NAME[m]);
         return true;
     }
     return false;
@@ -499,7 +477,7 @@ bool parseWeekly(char *buf, EnsoData &d) {
         float sst, ssta;
         if (!parseFloatTok(tok[5], sst) || !parseFloatTok(tok[6], ssta)) return false;
         d.weeklyAnom = ssta;
-        copyN(d.weeklyDate, sizeof(d.weeklyDate), tok[0], strlen(tok[0]));
+        copyStr(d.weeklyDate, sizeof(d.weeklyDate), tok[0], strlen(tok[0]));
         return true;
     });
 }
@@ -571,99 +549,61 @@ bool parseSeasonRow(char *buf, char season[4], float &anom) {
 // ---------------------------------------------------------------------------------------------
 // Everything below is the Arduino half
 // ---------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------
+// Body sinks (net::Session::stream)
+// ---------------------------------------------------------------------------------------------
+
+// Keeps the last cap-1 bytes of a body (so a 200 reply with the whole file, when Range is ignored,
+// still ends up as just the tail). NUL-terminated by finish().
+struct Tail {
+    char *buf;
+    size_t cap;
+    size_t len = 0;
+    void finish() { buf[len] = '\0'; }
+};
+
+bool tailSink(void *ctx, const uint8_t *b, size_t n) {
+    Tail &t = *static_cast<Tail *>(ctx);
+    const size_t keep = t.cap - 1;
+    if (n >= keep) {
+        memcpy(t.buf, b + n - keep, keep);
+        t.len = keep;
+        return true;
+    }
+    if (t.len + n > keep) {
+        const size_t drop = t.len + n - keep;
+        memmove(t.buf, t.buf + drop, t.len - drop);
+        t.len -= drop;
+    }
+    memcpy(t.buf + t.len, b, n);
+    t.len += n;
+    return true;
+}
+
+bool htmlSink(void *ctx, const uint8_t *b, size_t n) {
+    static_cast<HtmlText *>(ctx)->feed(b, n);
+    return true;
+}
+
 #ifndef ENSO_HOST_TEST
 
 constexpr const char *CPC_BASE = "https://www.cpc.ncep.noaa.gov";
-constexpr uint32_t CONNECT_TIMEOUT_MS = 5000;
-constexpr uint32_t READ_TIMEOUT_MS = 6000;
-constexpr uint32_t HANDSHAKE_TIMEOUT_S = 5;
-constexpr const char *USER_AGENT = "powerwall-display/1.0 (personal ESP32 display; Figment Sieve Industries)";
 constexpr size_t WORK_BYTES = 8192;        // one PSRAM buffer: discussion text, or a file tail
 constexpr size_t TAIL_BYTES = 2304;        // largest tail we keep (24 sstoi rows of ~73 bytes + a partial line)
 constexpr size_t MAX_BODY_BYTES = 262144;  // abort if a server ignores Range on the 148 KB weekly file and keeps going
 
-EnsoData s_enso;
+Shared<EnsoData> s_enso;
 
-SemaphoreHandle_t lock() {
-    static SemaphoreHandle_t m = xSemaphoreCreateMutex(); // created on first use (thread-safe static init)
-    return m;
-}
-
-struct Guard {
-    Guard() { xSemaphoreTake(lock(), portMAX_DELAY); }
-    ~Guard() { xSemaphoreGive(lock()); }
-};
-
-// HTTPClient::writeToStream target. Either strips HTML into a text buffer, or keeps the last tailCap bytes
-// (so a 200 reply with the whole file, when Range is ignored, still ends up as just the tail).
-class Sink : public Stream {
-  public:
-    explicit Sink(HtmlText *h) : html_(h) {} // NOLINT(clang-analyzer-optin.cplusplus.UninitializedObject) Stream::_startMillis is the Arduino core's
-    Sink(char *tail, size_t tailCap) : tail_(tail), tailCap_(tailCap) {} // NOLINT(clang-analyzer-optin.cplusplus.UninitializedObject) Stream::_startMillis is the Arduino core's
-
-    size_t write(const uint8_t *b, size_t n) override {
-        total_ += n;
-        if (total_ > MAX_BODY_BYTES) return 0; // makes writeToStream fail
-        if (html_) {
-            html_->feed(b, n);
-        } else if (n >= tailCap_ - 1) {
-            memcpy(tail_, b + n - (tailCap_ - 1), tailCap_ - 1);
-            tailLen_ = tailCap_ - 1;
-        } else {
-            if (tailLen_ + n > tailCap_ - 1) {
-                const size_t drop = tailLen_ + n - (tailCap_ - 1);
-                memmove(tail_, tail_ + drop, tailLen_ - drop);
-                tailLen_ -= drop;
-            }
-            memcpy(tail_ + tailLen_, b, n);
-            tailLen_ += n;
-        }
-        return n;
-    }
-    size_t write(uint8_t b) override { return write(&b, 1); }
-    int available() override { return 0; }
-    int read() override { return -1; }
-    int peek() override { return -1; }
-
-    void finish() {
-        if (html_) html_->finish();
-        else tail_[tailLen_] = '\0';
-    }
-    size_t total() const { return total_; }
-
-  private:
-    HtmlText *html_ = nullptr;
-    char *tail_ = nullptr;
-    size_t tailCap_ = 0, tailLen_ = 0, total_ = 0;
-};
-
-// One GET with a Range header on the shared keep-alive connection. 200 and 206 are both fine.
-bool fetchRange(HTTPClient &http, WiFiClientSecure &client, const char *path, const char *range, Sink &sink) {
-    String url = CPC_BASE;
-    url += path;
-    for (int attempt = 0; attempt < 2; attempt++) {
-        if (!http.begin(client, url)) return false;
-        http.addHeader("Range", range);
-        const int code = http.GET();
-        if (code == HTTP_CODE_OK || code == HTTP_CODE_PARTIAL_CONTENT) {
-            const int n = http.writeToStream(&sink);
-            if (n >= 0) {
-                sink.finish();
-                return true;
-            }
-            Serial.printf("ENSO: %s body -> %s\n", path, HTTPClient::errorToString(n).c_str());
-            client.stop();
-            return false;
-        }
-        client.stop(); // unread body or dead connection: never reuse it
-        if (code > 0) {
-            Serial.printf("ENSO: %s -> HTTP %d\n", path, code);
-            return false;
-        }
-        // negative: usually the server closed our idle keep-alive connection; reconnect once
-        if (attempt == 1) Serial.printf("ENSO: %s -> %s\n", path, HTTPClient::errorToString(code).c_str());
-    }
-    return false;
+// One GET with a Range header on the session's keep-alive connection (200 and 206 are both fine)
+bool fetchTail(net::Session &s, const char *path, const char *range, Tail &t) {
+    char url[128];
+    snprintf(url, sizeof(url), "%s%s", CPC_BASE, path);
+    net::Request q;
+    q.range = range;
+    t.len = 0;
+    if (s.stream(url, tailSink, &t, MAX_BODY_BYTES, nullptr, q) != net::Result::Ok) return false;
+    t.finish();
+    return true;
 }
 
 #endif // !ENSO_HOST_TEST
@@ -672,80 +612,76 @@ bool fetchRange(HTTPClient &http, WiFiClientSecure &client, const char *path, co
 
 #ifndef ENSO_HOST_TEST
 
-EnsoData ensoData() {
-    Guard g;
-    return s_enso;
-}
+EnsoData ensoData() { return s_enso.get(); }
 
 bool ensoFetch() {
-    char *work = (char *)heap_caps_malloc(WORK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!work) work = (char *)malloc(WORK_BYTES);
-    if (!work) {
+    HeapBuf workMem;
+    if (!workMem.psram(WORK_BYTES) && !workMem.internal(WORK_BYTES)) {
         Serial.println("ENSO: no memory for the work buffer");
         return false;
     }
+    char *work = workMem.as<char>();
 
     EnsoData d = ensoData(); // merge into a copy of what we have; failed parts keep their old values
     bool ok = true;
     bool any = false;
     {
-        WiFiClientSecure client;
-        client.setCACert(CPC_CA);
-        client.setHandshakeTimeout(HANDSHAKE_TIMEOUT_S);
-        HTTPClient http;
-        http.setReuse(true);
-        http.setUserAgent(USER_AGENT);
-        http.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        http.setTimeout(READ_TIMEOUT_MS);
+        net::Options o;
+        o.tag = "ENSO";
+        o.ca = CPC_CA;
+        o.keepAlive = true;
+        o.connectMs = 5000; // CPC is slow to answer from the UK at times
+        o.readMs = 6000;
+        o.budgetMs = PW_JOB_BUDGET_MS; // parts skipped when it runs out are fetched next time (merge)
+        net::Session s(o);
 
         // 1. The discussion page: whole page (about 13.5 KB; the odds and next date are past byte 8192),
         // streamed through the tag stripper into an 8 KB text buffer
         {
             HtmlText ht;
             ht.init(work, WORK_BYTES);
-            Sink sink(&ht);
-            if (fetchRange(http, client, "/products/analysis_monitoring/enso_advisory/ensodisc.shtml", "bytes=0-16383", sink)) {
+            char url[128];
+            snprintf(url, sizeof(url), "%s%s", CPC_BASE, "/products/analysis_monitoring/enso_advisory/ensodisc.shtml");
+            net::Request q;
+            q.range = "bytes=0-16383";
+            if (s.stream(url, htmlSink, &ht, MAX_BODY_BYTES, nullptr, q) == net::Result::Ok) {
+                ht.finish();
                 const bool a = parseAlert(work, d);
-                const bool s = parseSynopsis(work, d);
+                const bool sy = parseSynopsis(work, d);
                 const bool p = parseProbs(work, d);
                 const bool n = parseNextUpdate(work, d);
                 if (!a) Serial.println("ENSO: no alert status in the discussion text");
                 if (!p) Serial.println("ENSO: no odds in the discussion text");
                 ok = ok && a; // odds/date/synopsis are best effort: their wording changes with the season
-                any = any || a || s || p || n;
+                any = any || a || sy || p || n;
             } else {
                 ok = false;
             }
         }
 
+        Tail tail{work, TAIL_BYTES};
+
         // 2. Weekly SST, last row
-        {
-            Sink sink(work, TAIL_BYTES);
-            if (fetchRange(http, client, "/data/indices/wksst9120.for", "bytes=-300", sink) && parseWeekly(work, d)) {
-                any = true;
-            } else {
-                Serial.println("ENSO: weekly Nino SST failed");
-                ok = false;
-            }
+        if (fetchTail(s, "/data/indices/wksst9120.for", "bytes=-300", tail) && parseWeekly(work, d)) {
+            any = true;
+        } else {
+            Serial.println("ENSO: weekly Nino SST failed");
+            ok = false;
         }
 
         // 3. Monthly Nino3.4 anomaly, last 24 rows (73 bytes per row)
-        {
-            Sink sink(work, TAIL_BYTES);
-            if (fetchRange(http, client, "/data/indices/sstoi.indices", "bytes=-1900", sink) && parseMonthly(work, d)) {
-                any = true;
-            } else {
-                Serial.println("ENSO: monthly Nino SST failed");
-                ok = false;
-            }
+        if (fetchTail(s, "/data/indices/sstoi.indices", "bytes=-1900", tail) && parseMonthly(work, d)) {
+            any = true;
+        } else {
+            Serial.println("ENSO: monthly Nino SST failed");
+            ok = false;
         }
 
         // 4. ONI and RONI, last row each
         {
-            Sink sink(work, TAIL_BYTES);
             float v = 0;
             char seas[4] = "";
-            if (fetchRange(http, client, "/data/indices/oni.ascii.txt", "bytes=-200", sink) && parseSeasonRow(work, seas, v)) {
+            if (fetchTail(s, "/data/indices/oni.ascii.txt", "bytes=-200", tail) && parseSeasonRow(work, seas, v)) {
                 d.oni = v;
                 memcpy(d.oniSeason, seas, 4);
                 any = true;
@@ -755,10 +691,9 @@ bool ensoFetch() {
             }
         }
         {
-            Sink sink(work, TAIL_BYTES);
             float v = 0;
             char seas[4] = "";
-            if (fetchRange(http, client, "/data/indices/RONI.ascii.txt", "bytes=-150", sink) && parseSeasonRow(work, seas, v)) {
+            if (fetchTail(s, "/data/indices/RONI.ascii.txt", "bytes=-150", tail) && parseSeasonRow(work, seas, v)) {
                 d.roni = v;
                 memcpy(d.roniSeason, seas, 4);
                 any = true;
@@ -767,18 +702,12 @@ bool ensoFetch() {
                 ok = false;
             }
         }
-        http.end();
-        client.stop();
     }
-    heap_caps_free(work);
 
     if (!any) return false;
     d.valid = !isnan(d.weeklyAnom) || !isnan(d.oni);
     d.fetchedMs = millis();
-    {
-        Guard g;
-        s_enso = d;
-    }
+    s_enso.set(d);
 
     char odds[64] = "";
     size_t o = 0;
