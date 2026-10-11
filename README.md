@@ -1,4 +1,5 @@
 # ESP32-4848S040 lab
+<!-- Social preview image: docs/images/social-preview.png (1280x640). GitHub has no API for it: upload it manually in the repo's Settings > General > Social preview. -->
 
 A hobby lab for the **Guition ESP32-4848S040**: an ESP32-S3 board with a 4" 480x480 capacitive touch screen in an 86 mm wall-box format. The repository holds PlatformIO projects, a shared board library, hardware notes and a development guide built on measurements taken on a real unit. The headline project is a **Tesla Powerwall 3 dashboard** that reads the gateway's local LAN API, with no cloud account and no server.
 

@@ -24,7 +24,13 @@ Numbers are assigned when a project starts.
 | wifi-ota | Wi-Fi provisioning + ArduinoOTA + mDNS; second env with `upload_protocol = espota` |
 | esphome-minimal | Minimal ESPHome YAML (display, touch, backlight, OTA) for Home Assistant |
 | LVGL performance, round 2 | Done so far: `-O2`, IRAM, 120-line buffer (35 FPS); double FB and 2 draw threads were slower. Next: async DMA flush (`esp_async_memcpy`) with 2 draw buffers to hide the 20 ms copy, then esp_lvgl_port SIMD blend. |
-| 05 follow-ups | OTA updates (it will be wall-mounted); day/week/month charts from the SD log; a VPP test toggle; optional TEDAPI access for backup reserve / operation mode; fewer simultaneous label redraws on the power-flow screen (the remaining ~150 ms frames). |
+| 05: long soak | Several hours with gateway keep-alive + the mbedTLS 4 KB PSRAM threshold, to check leaks, heap fragmentation and reconnects. |
+| 05: OTA updates | Before wall-mounting (the USB port will be hard to reach). Related: the `wifi-ota` idea above. |
+| 05: history charts | Day / week / month charts from the SD minute log. |
+| 05: VPP test toggle | A way to exercise the VPP-active display state without a real event. |
+| 05: TEDAPI (optional) | Backup reserve and operation mode, which the customer-login local API does not expose. |
+| 05: design N free slot | Use the free left slot in design board N (private design canvas) for a new tile. |
+| 05: Wi-Fi label throttle | In progress: remaining ~135-190 ms frames on the main screen when all power-flow labels and the top-bar Wi-Fi label redraw together. Tracked until the fix is verified on the device. |
 | Backlight range | The 05 brightness slider barely changes the backlight. Plan: (A) lower the PWM from 100 kHz to ~20-25 kHz after a serial-driven sweep with someone watching/listening, then re-measure the minimum; (B) gamma curve on the slider. Details: [docs/02-pinout.md](../docs/02-pinout.md#backlight-dimming-range-planned-not-yet-done). |
 | LovyanGFX alternative | Port the shared lib to LovyanGFX (`Panel_ST7701_guition_esp32_4848S040`, see `reference/ESP32-4848S040-LVGL-LGFX`) and compare speed |
 

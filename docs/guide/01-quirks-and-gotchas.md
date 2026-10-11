@@ -269,8 +269,8 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Symptom:** User report, 2026-10-11: after the display had run a while it crackled (sparkled), and "once it starts it becomes constant". Project 05 with Wi-Fi, TLS and a JPEG decode.
 - **Root cause (inferred):** More PSRAM traffic than the bounce buffers could hide. The suspect was the mbedTLS handshake arithmetic: after the first RAM fix every mbedTLS allocation of 1 KB or more went to PSRAM, and the gateway handshake runs every 2 s. The hourly sun-image decode (about 0.8 s) was a smaller suspect.
 - **Fix:** Three changes in commit `300e7b5`: mbedTLS blocks go to PSRAM only at 4 KB and up ([Q-MEM-02](#q-mem-02)); bounce buffers doubled to 480x20 in `projects/05-powerwall-display/src/main.cpp` (about 38 KB internal); the El Nino ticker was slowed.
-- **Evidence:** User report; the changes. No user statement that the crackle is gone is recorded in the sources read. Later 10-minute soaks show no unusual frame gaps ([Q-GFX-03](#q-gfx-03)) but crackle is a visual symptom. Investigation: [inv-crackle-psram-contention](03-investigations.md#inv-crackle).
-- **Status:** worked-around, visual confirmation not recorded. **Applies to:** any RGB panel on PSRAM with other PSRAM-heavy work.
+- **Evidence:** User report; the changes. Confirmed visually by the owner, 2026-10-11 ("screen looks good now") with all the mitigations in place (2x bounce buffers, 4 KB threshold, rotation-3 flush path, gateway keep-alive). Later 10-minute soaks also show no unusual frame gaps ([Q-GFX-03](#q-gfx-03)). Investigation: [inv-crackle-psram-contention](03-investigations.md#inv-crackle).
+- **Status:** worked-around (visually confirmed by the owner, 2026-10-11). **Applies to:** any RGB panel on PSRAM with other PSRAM-heavy work.
 
 <a id="q-gfx-03"></a>
 ### Q-GFX-03 Rotated flush about 2x slow in Arduino_GFX
@@ -278,7 +278,7 @@ Status key: F fixed, W worked-around, O open, D documented.
 - **Root cause:** With software rotation, `draw16bitRGBBitmap` writes an LVGL strip column by column. Each pixel lands on a different 960-byte framebuffer row, so the PSRAM cache thrashes. It then writes back every full framebuffer row it touched: about 460 KB of cache write-back for a 480x48 strip that changed 46 KB.
 - **Fix:** `flushRot3()` in `common/lib/Board4848S040/src/Board4848S040_lvgl.cpp` writes each framebuffer row as one contiguous segment and writes back only that segment (`Cache_WriteBack_Addr`). Other rotations still use the Arduino_GFX path.
 - **Evidence:** Full-screen redraw 254 ms to 142 ms; the ~300 ms many-area redraws to 145-185 ms ([hardware-log](../hardware-log.md), 2026-10-11, commit `bd3f28d`). The post-fix 10-minute soaks end with max frame gaps of 54-95 ms on the main screen (one earlier window showed 307 ms).
-- **Status:** fixed for rotation 3 (visual confirmation not recorded). Investigation: [inv-rotated-flush-stutter](03-investigations.md#inv-stutter-rotated-flush). **Applies to:** any Arduino_GFX RGB display with LVGL partial rendering and software rotation.
+- **Status:** fixed for rotation 3. Owner, 2026-10-11: stutter "a lot less noticeable"; ~135-190 ms frames remain when all power-flow labels and the top-bar Wi-Fi label redraw together (a Wi-Fi label throttle is in progress). Investigation: [inv-rotated-flush-stutter](03-investigations.md#inv-stutter-rotated-flush). **Applies to:** any Arduino_GFX RGB display with LVGL partial rendering and software rotation.
 
 <a id="q-gfx-04"></a>
 ### Q-GFX-04 Backlight PWM frequency silently ignored

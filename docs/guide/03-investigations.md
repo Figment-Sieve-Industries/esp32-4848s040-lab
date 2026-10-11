@@ -42,8 +42,8 @@ Hardware: one Guition ESP32-4848S040C_I ("unit 1"; ESP32-S3 N16R8, 4" 480x480 ST
 | [inv-internal-ram](#inv-internal-ram) | Internal RAM low point below 100 KB | Memory | fixed | min ever 92,136 B -> 146,116 B -> 118,096 B | 2026-10-11 |
 | [inv-loop-stack-overflow](#inv-loop-stack-overflow) | Core 1 panic: LVGL task stack nearly full | Memory | fixed | stack free 824 B -> 9,624 B | 2026-10-11 |
 | [inv-boot-race-lock](#inv-boot-race-lock) | SD task used a mutex before it existed | Concurrency | fixed | assert in `xQueueSemaphoreTake` -> none | 2026-10-11 |
-| [inv-crackle](#inv-crackle) | Panel "crackle" after the mbedTLS-to-PSRAM change | Display / memory | mitigated (not user-confirmed) | 1 KB -> 4 KB threshold, 480x10 -> 480x20 bounce | 2026-10-11 |
-| [inv-stutter-rotated-flush](#inv-stutter-rotated-flush) | ~300 ms stutters on the main screen | Display / performance | fixed (partly) | full-screen render 254 ms -> 142 ms; many-area 293-309 ms -> 134-196 ms | 2026-10-11 |
+| [inv-crackle](#inv-crackle) | Panel "crackle" after the mbedTLS-to-PSRAM change | Display / memory | works on hw (owner, 2026-10-11) | 1 KB -> 4 KB threshold, 480x10 -> 480x20 bounce | 2026-10-11 |
+| [inv-stutter-rotated-flush](#inv-stutter-rotated-flush) | ~300 ms stutters on the main screen | Display / performance | works on hw (much less noticeable; ~135-190 ms frames remain) | full-screen render 254 ms -> 142 ms; many-area 293-309 ms -> 134-196 ms | 2026-10-11 |
 | [inv-redraw-load](#inv-redraw-load) | Constant redraw load from animations | UI / performance | mitigated | not isolated | 2026-10-11 |
 | [inv-job-budget](#inv-job-budget) | Long background jobs made live data stale | Network | fixed | jobs up to 25 s+ -> 12 s budget | 2026-10-11 |
 | [inv-shared-modules](#inv-shared-modules) | Consolidation round: duplicated HTTP code | Code quality | done | flash 2,263,562 -> 2,250,190 B; 217 host tests | 2026-10-11 |
@@ -97,7 +97,7 @@ Reading the table:
 | `LV_ATTRIBUTE_FAST_MEM` (IRAM) in a network project | 05 boot free 60,768 B and TLS failing with -32512; 170,236 B and TLS working without it. Source: transcript 2026-10-10 | rejected for 05. [inv-tls-oom](#inv-tls-oom) |
 | LVGL on the C heap (`LV_STDLIB_CLIB`) with many screens | Polling free 37,764 B against 140,060 B with a PSRAM pool. Source: transcript 2026-10-10 | rejected. [inv-lvgl-heap-psram](#inv-lvgl-heap-psram) |
 | HTTPClient keep-alive with HTTPClient's own chunk reader | Task watchdog (IDLE0) inside `HTTPClient::getString()` within ~20-28 s of boot. Source: transcript 2026-10-10, [07-gotchas](../07-gotchas.md) | rejected; replaced by an own de-chunker. [inv-chunked-stall](#inv-chunked-stall) |
-| mbedTLS allocations of 1 KB and up in PSRAM | Low point 92,136 -> 146,116 B, but the panel started to crackle. Moved to a 4 KB threshold. Source: `cca53c5`, `300e7b5`, transcript 2026-10-11 | rejected (threshold too low). [inv-crackle](#inv-crackle) |
+| mbedTLS allocations of 1 KB and up in PSRAM | Low point 92,136 -> 146,116 B, but the panel started to crackle. Moved to a 4 KB threshold. Source: `cca53c5`, `300e7b5`, transcript 2026-10-11 | rejected (threshold too low; crackle gone at 4 KB, confirmed by the owner 2026-10-11). [inv-crackle](#inv-crackle) |
 | `custom_sdkconfig` (pioarduino hybrid compile) | Not tried. Reading pioarduino's builder showed it rewrites the shared global framework package and reinstalls it whenever another project builds. Source: [12-esp32-performance-and-framework](../12-esp32-performance-and-framework.md) section 4c | rejected on analysis; `framework = arduino, espidf` is the preferred route if ever needed |
 | 120 MHz PSRAM | Not tried: experimental in IDF, risky above 65 °C, and PCLK (12 MHz) is far below the 80 MHz PSRAM limit (~22 MHz). Source: [12](../12-esp32-performance-and-framework.md) section 3 | rejected on analysis |
 | Run `onShow` fades on `LV_EVENT_SCREEN_LOADED` (after the slide) | The UI-core agent reasoned that the cards would be fully visible during the slide, then flash to transparent and fade in. Not measured or seen on hardware (inferred). It used a 300 ms show delay behind `-DUI_FADE_AFTER_SLIDE` instead. Source: transcript 2026-10-11 (agent report), `1f816a8` | rejected on reasoning |
@@ -704,7 +704,7 @@ The 2 GB card before the fix: 1 MB write failed in all 3 runs. The 256 KB patter
 |---|---|
 | Date | 2026-10-11 |
 | Area | Display / memory |
-| Status | mitigated; the user has not reported whether the crackle is gone |
+| Status | works on hw: confirmed visually by the owner, 2026-10-11 ("screen looks good now") after the mitigations (2x bounce buffers 480x20, mbedTLS PSRAM threshold 4 KB, rotation-3 flush path, gateway keep-alive) |
 | Fix | `300e7b5` 05: crackle fixes (2x bounce buffers, mbedTLS PSRAM threshold 4 KB), slower ENSO ticker, stutter diagnostics |
 
 **Symptom.** "starting to see some strangle crackling on the main screen now it's been running for a bit", then "once it starts it becomes a constant crackle" (user). The report came right after `cca53c5` was deployed.
@@ -733,11 +733,11 @@ The user chose 1 + 2.
 | Polling internal free | ~156 KB | ~136 KB |
 | Min ever internal | 137,516 B | 118,096 B |
 | Largest block | 88,052 B | 63,476 B |
-| Crackle | reported, constant | not reported again; not confirmed gone |
+| Crackle | reported, constant | gone; confirmed visually by the owner, 2026-10-11 |
 
 The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504 B). This suggests the threshold change itself cost little at the low point (inferred).
 
-**Follow-ups.** Ask the user whether the crackle is still visible after `300e7b5` + `bd3f28d`. Untried options from [12](../12-esp32-performance-and-framework.md): 64-byte data-cache line, `SPIRAM_XIP_FROM_PSRAM` (both need a custom sdkconfig), and lowering PCLK around heavy PSRAM work.
+**Follow-ups.** Confirmed gone by the owner on 2026-10-11 with all mitigations in place; which single change did the most is not isolated. A long soak (several hours) for leaks, fragmentation and reconnects is still planned ([projects/README.md](../../projects/README.md#planned)). Untried options from [12](../12-esp32-performance-and-framework.md): 64-byte data-cache line, `SPIRAM_XIP_FROM_PSRAM` (both need a custom sdkconfig), and lowering PCLK around heavy PSRAM work.
 
 **Sources.** Transcript 2026-10-11; [hardware-log](../hardware-log.md) "Rotated flush" row (last sentence); `300e7b5` message.
 
@@ -749,7 +749,7 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 |---|---|
 | Date | 2026-10-11 |
 | Area | Display / performance |
-| Status | fixed (partly): the stalls halved but did not disappear |
+| Status | works on hw: owner, 2026-10-11: stutter "a lot less noticeable". Not fully gone: ~135-190 ms frames remain when all power-flow labels and the top-bar Wi-Fi label redraw together; a fix throttling the Wi-Fi label is in progress |
 | Fix | `bd3f28d` Board4848S040: rotation-3 LVGL flush writes framebuffer rows contiguously and writes back only what changed; diagnostics in `300e7b5`; docs in `d6f1b22` |
 
 **Symptom.** "now it seems to stutter every once in a while on the main screen" (user).
@@ -801,7 +801,7 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 | | |
 |---|---|
 | Date | 2026-10-11 |
-| Status | mitigated (changes made; effect not isolated) |
+| Status | mitigated (changes made; effect not isolated). Owner, 2026-10-11: the refactor's visual changes (health sheen without `clip_corner`, sun image hard edge, 58-bar wind strip, sun chip label layout) look good on the device |
 | Commits | `300e7b5` (ENSO ticker 40 -> 20 px/s); `1f816a8` 05 refactor: UI core helpers, BarChart, screen registry, serial commands; `775b417`, `0042c90` (screens) |
 
 **Findings** (consolidation review, read-only; marked "(bench)" where it needed measuring):
@@ -821,7 +821,7 @@ The drop in min ever (19,420 B) is almost exactly the bounce-buffer cost (19,504
 
 **Measurement.** A new heartbeat metric `redraw: <px>/s, <n> flushes/s` exists from `1f816a8` onwards. It has no before value. On the main screen it read 260,075-304,846 px/s and 234-256 flushes/s (`soak-refactor.log`), and up to 389,540 px/s and 333 flushes/s (`soak-keepalive.log`; depends on live flows, inferred).
 
-**Follow-ups.** Try 33 ms chevrons or one draw object per flow path, and compare FPS, px/s and flushes/s.
+**Follow-ups.** Try 33 ms chevrons or one draw object per flow path, and compare FPS, px/s and flushes/s. The remaining ~135-190 ms frames (owner: stutter "a lot less noticeable", 2026-10-11) occur when all power-flow labels and the top-bar Wi-Fi label redraw together; a fix throttling the Wi-Fi label is in progress.
 
 **Sources.** Consolidation plan (session notes, 2026-10-11); `soak-refactor.log`; `soak-keepalive.log`; [05 README](../../projects/05-powerwall-display/README.md) (serial commands, heartbeat).
 
