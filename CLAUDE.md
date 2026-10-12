@@ -22,7 +22,7 @@ Updating the guide is part of finishing a task, not optional:
 
 Testing on hardware (project 05 pattern, reuse it in new projects): serial commands (`s n p l e b bf bd br bs y m x v c k r h`; the comment block at the top of `projects/05-powerwall-display/src/main.cpp` is the source of truth), screenshots with `projects/05-powerwall-display/tools-dev/screendump.py COM9 out --all --privacy` (look at every screen after UI changes), timestamped soak logs, `addr2line` for backtraces, host tests in `projects/05-powerwall-display/hosttest/run.ps1`. Details and pitfalls (CH340 reset on port open, concurrent pio runs): guide chapter 02.
 
-Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits only as `Paul <paul@wibjibit.com>`. Never commit secrets, flash backups, serial/soak logs (they contain the home SSID), local paths, private claude.ai links, the home town or coordinates; screenshots only in privacy mode (`v 1`). CI builds every project and runs the host tests on each push.
+Public repo (github.com/Figment-Sieve-Industries/esp32-4848s040-lab): commits only as `Paul <paul@wibjibit.com>`. Never commit secrets, flash backups, serial/soak logs (they contain the home SSID), local paths, private claude.ai links, the home town or coordinates; screenshots only in privacy mode (`v 1`). Branches: work on `dev` and merge into `main` by pull request; never commit to `main` directly. CI (build every project + host tests) runs only on PRs into `main` and pushes to `main`, and skips docs-only changes, so build locally (`tools/build-all.ps1`) before pushing to `dev`. Releases: tag `v*` on `main` (release.yml, ADR-36).
 
 ## Layout
 - `README.md`: master index (projects table with the Powerwall 3 display featured, screenshots, where to buy)

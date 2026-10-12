@@ -1,4 +1,6 @@
-# Build every PlatformIO project and run project 05's host tests on each push and pull request.
+# Build every PlatformIO project and run project 05's host tests on pull requests into main and on pushes to main.
+# Day-to-day work goes to the dev branch, which does not build on push; open a PR into main to run this.
+# Docs-only changes (Markdown, docs/) skip the build. Run it by hand from the Actions tab if needed.
 # Projects that need credentials build with their secrets.example.h copied to secrets.h (placeholders).
 name: CI
 
@@ -7,8 +9,17 @@ permissions:
 
 on:
   push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+
+concurrency:
+  # A newer push to the same PR cancels the older, still-running build.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
