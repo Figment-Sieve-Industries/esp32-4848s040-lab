@@ -19,7 +19,7 @@
 #include "history.h"
 #include "mem_util.h"
 #include "net_http.h"
-#include "secrets.h"
+#include "config_store.h"
 #include "shared_state.h"
 #include "sky.h"
 #include "space.h"
@@ -87,7 +87,7 @@ void setHttpError(const char *what, int code) {
     setError(msg);
 }
 
-String gwUrl(const char *path) { return String("https://") + PW_HOST + path; }
+String gwUrl(const char *path) { return String("https://") + cfg::get().pwHost + path; }
 
 // Starts a request on the shared gateway connection.
 // keepAlive false: HTTP/1.0 request -> the gateway sends a plain (non-chunked) body and closes the
@@ -121,7 +121,7 @@ bool login() {
     s_gwHttp.addHeader("Content-Type", "application/json");
     JsonDocument req(psramJson());
     req["username"] = "customer";
-    req["password"] = PW_CUSTOMER_PASSWORD;
+    req["password"] = cfg::get().pwPassword;
     req["email"] = "";
     req["clientInfo"]["timezone"] = "Europe/London";
     String body;
@@ -306,7 +306,7 @@ bool fetchWeather() {
              "&current=temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,cloud_cover"
              "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"
              "&hourly=temperature_2m,weather_code,is_day&forecast_hours=11&forecast_days=1&timezone=auto",
-             (double)WEATHER_LAT, (double)WEATHER_LON);
+             (double)cfg::get().lat, (double)cfg::get().lon);
     HeapBuf body;
     if (!body.psram(WEATHER_BUF)) {
         Serial.println("Weather: no PSRAM for the body");
@@ -408,9 +408,18 @@ struct JobState {
 JobState s_jobs[JOB_COUNT];
 static_assert(JOB_COUNT <= 32, "job enable mask is one 32-bit word");
 std::atomic<uint32_t> s_jobOff{0}; // bit i set = JOBS[i] disabled (netSetJobEnabled)
+// bit i set = JOBS[i] is not allowed by the user config (e.g. auroraUk=false). Set once in powerwallStart, before
+// the net task exists. A job runs only if its bit is clear in BOTH masks, so re-enabling a screen can't override it.
+uint32_t s_cfgOff = 0;
+void setConfigJobOff(const char *name);
 // bit i set = JOBS[i] was just re-enabled: the net task makes it due now. (A stale `next` from before a
 // long disable would otherwise look "in the future" once millis() wraps the signed 24.8 day window.)
 std::atomic<uint32_t> s_jobReset{0};
+
+void setConfigJobOff(const char *name) {
+    for (size_t i = 0; i < JOB_COUNT; i++)
+        if (strcmp(JOBS[i].name, name) == 0) s_cfgOff |= 1u << i;
+}
 
 // Runs a TLS job with the gateway's session closed first (one TLS session at a time), logging the
 // internal-RAM low-water mark it reached.
@@ -434,7 +443,7 @@ void runOneJob() {
         const JobDef &j = JOBS[i];
         JobState &st = s_jobs[i];
         if ((int32_t)(now - st.next) < 0) continue;
-        if (s_jobOff.load(std::memory_order_relaxed) & (1u << i)) continue; // switched off in Settings
+        if ((s_jobOff.load(std::memory_order_relaxed) | s_cfgOff) & (1u << i)) continue; // off in Settings or config
         if (j.needed && !j.needed()) continue;
         const bool ok = j.tls ? runTls(j) : j.fn();
         uint32_t wait = ok ? j.okMs : j.retryMs;
@@ -596,8 +605,12 @@ void powerwallStart(uint32_t pollMs) {
     WiFi.persistent(false); // don't write the Wi-Fi config to NVS (internal flash) at runtime
     WiFi.mode(WIFI_STA);
     WiFi.setHostname("powerwall-display");
-    for (const WifiCred &w : WIFI_NETWORKS) s_wifiMulti.addAP(w.ssid, w.password);
-    configTzTime(TZ_INFO, "pool.ntp.org", "time.google.com");
+    const cfg::Config &uc = cfg::get();
+    for (int i = 0; i < uc.wifiCount; i++) s_wifiMulti.addAP(uc.wifi[i].ssid, uc.wifi[i].pass);
+    configTzTime(uc.tz, "pool.ntp.org", "time.google.com");
+    // Config-side job switch (separate from the Settings screen mask, which main.cpp drives through
+    // netSetJobEnabled): AuroraWatch UK only runs when the user said they are in the UK.
+    if (!uc.auroraUk) setConfigJobOff("aurora");
     // Core 0 (Arduino loop/LVGL runs on core 1). TLS + JPEG decode need a generous stack.
     // Idle priority (0): network libraries can busy-wait without yielding (e.g. Stream::readBytes);
     // at priority 0 they time-slice with core 0's idle task, so the task watchdog can't fire.

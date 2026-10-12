@@ -17,6 +17,7 @@
 #include "setup_portal.h"
 #include "ca_certs.h"
 #include "config_store.h"
+#include "config_validate.h"
 #include "gw_discover.h"
 #include "mem_util.h"
 #include "net_http.h"
@@ -663,6 +664,13 @@ void handleSave() {
     cfg::Config c;
     char zone[40];
     if (!buildConfig(d, c, zone, sizeof(zone))) return;
+    char why[72] = "";
+    if (!cfgv::validate(c, why, sizeof(why))) { // the store's own rules, before anything touches the gateway
+        char m[96];
+        snprintf(m, sizeof(m), "Not saved: %s", why);
+        memset(&c, 0, sizeof(c));
+        return sendError(400, m);
+    }
     memset(s_mem->body.buf, 0, sizeof(s_mem->body.buf)); // the body held passwords
     s_mem->body.len = 0;
     copyStr(s_tzName, sizeof(s_tzName), zone);

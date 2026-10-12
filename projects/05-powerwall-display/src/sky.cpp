@@ -9,7 +9,7 @@
 #include "mem_util.h"
 #include "net_http.h"
 #include "powerwall.h"
-#include "secrets.h"
+#include "config_store.h"
 #include "shared_state.h"
 #include "time_util.h"
 #include <Arduino.h>
@@ -238,7 +238,7 @@ bool skyFetchMoon() {
     // MET Norway: at most 4 decimals of position
     snprintf(url, sizeof(url),
              "https://api.met.no/weatherapi/sunrise/3.0/moon?lat=%.4f&lon=%.4f&date=%04d-%02d-%02d&offset=%c%02d:%02d",
-             (double)WEATHER_LAT, (double)WEATHER_LON, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday,
+             (double)cfg::get().lat, (double)cfg::get().lon, lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday,
              offMin < 0 ? '-' : '+', abs(offMin) / 60, abs(offMin) % 60);
     HeapBuf body;
     if (!allocBody(body)) return false;

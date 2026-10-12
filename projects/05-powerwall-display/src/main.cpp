@@ -49,6 +49,7 @@
 #include <string.h>
 #include "cache.h"
 #include "config_store.h"
+#include "gw_discover.h"
 #include "setup_portal.h"
 #include "day_history.h"
 #include "energy.h"
@@ -586,6 +587,11 @@ static void handleCommand(char *line) {
             break;
         case 'y':
             cmdHistory(arg);
+            break;
+        case 'g': // DIAG gateway discovery: "g" scans the /24 (results logged as GwDisc:), "g <ip>" probes one host
+            if (*arg) cmdReply(gwdisc::probe(arg) ? "gateway probe: looks like a Powerwall gateway #ok"
+                                                  : "gateway probe: no #ok");
+            else cmdReply(gwdisc::start() ? "gateway scan started #ok" : "#err scan not started (running or no Wi-Fi)");
             break;
         case 'k': // DIAG panel drift: restart the RGB scan-out at the next VSYNC
             cmdReply(board4848::lcdRestart() ? "lcd restart requested #ok" : "#err lcd restart not available");

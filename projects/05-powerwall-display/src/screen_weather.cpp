@@ -4,7 +4,6 @@
 #include "ui_common.h"
 #include "icons.h"
 #include "powerwall.h"
-#include "secrets.h"
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
