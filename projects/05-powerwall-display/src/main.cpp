@@ -48,6 +48,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cache.h"
+#include "config_store.h"
+#include "setup_portal.h"
 #include "day_history.h"
 #include "energy.h"
 #include "history.h"
@@ -672,6 +674,12 @@ void setup() {
     // LV_USE_TJPGD only for space.cpp's raw decoder: don't let LVGL sniff every image it draws for JPEG
     lv_tjpgd_deinit();
     memStep("lvgl");
+
+    // User config (Wi-Fi, gateway, location): NVS, else a one-time import of config.json from the SD card, else
+    // secrets.h (developer builds). Without one, or with the screen held at power-on, run the setup portal instead
+    // of the dashboard; it saves and restarts (setup_portal.h).
+    cfg::begin();
+    if (setupRequested(hasTouch ? &touch : nullptr)) setupPortalRun();
     lv_display_add_event_cb(disp, frameCb, LV_EVENT_REFR_READY, nullptr);
     lv_display_add_event_cb(disp, refrStartCb, LV_EVENT_REFR_START, nullptr);       // DIAG
     lv_display_add_event_cb(disp, invalidateCb, LV_EVENT_INVALIDATE_AREA, nullptr); // DIAG + redraw metric

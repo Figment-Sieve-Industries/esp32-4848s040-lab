@@ -62,6 +62,7 @@ Status words follow the repo vocabulary (`idea` / `wip` / `builds` / `works on h
 | [34](#adr-34-sd-cache-of-fetched-data) | SD cache of fetched data | Storage |
 | [35](#adr-35-day-history-month-files-with-fixed-slots-and-per-slot-crc) | Day history: month files with fixed slots and per-slot CRC | Storage |
 | [36](#adr-36-release-pipeline-and-browser-flashing) | Release pipeline and browser flashing | Tooling |
+| [37](#adr-37-no-certificate-pinning-for-the-powerwall-gateway) | No certificate pinning for the Powerwall gateway | Network |
 
 Sections after the ADRs cover [UI conventions](#ui-conventions), [code conventions](#code-conventions), [repository layout](#repository-and-project-layout) and [open points](#open-points).
 
@@ -376,6 +377,14 @@ Three memories matter: internal RAM (small, needed by Wi-Fi, TLS, DMA, ISRs and 
 - **Alternatives.** Manifest pointing at Release asset URLs: GitHub release downloads (the `github.com` redirect and the `release-assets.githubusercontent.com` target) send no CORS headers, so a browser page cannot fetch them (reported by other ESP Web Tools projects; not tested here). `raw.githubusercontent.com` from committed binaries: has CORS but puts megabytes of binaries in git history on every release. A `gh-pages` branch with force-pushed binaries: works but needs a write token and history cleanup; the Actions Pages deploy needs neither. Offering only source builds: keeps the setup friction. Per-user builds in the browser: not possible, secrets are compile-time.
 - **Consequences.** The Release is the permanent archive (manual `esptool write-flash 0x0 <image>` works); Pages always shows the newest tag. One-time maintainer setup: repo Settings > Pages > Build and deployment > Source = **GitHub Actions**; Settings > Environments > github-pages > Deployment branches and tags must allow tags matching `v*` (the default rule allows only the default branch, which rejects tag runs). Once the setup portal ships, remove the `SETUP-NOTICE` block in `docs/flash/index.html`, and the "can't join Wi-Fi" sentences in `docs/getting-started-powerwall.md` and the README. A merged image holds the bootloader's flash header from the PlatformIO build; the Web Tools "erase" option wipes the factory firmware, so the page links the backup instructions ([D-18](02-debugging-playbook.md#d-18-flash-backup-and-restore)).
 - **Evidence.** `.github/workflows/release.yml`, `tools/make-flash-image.py`, `docs/flash/index.html`. `merge_bin` was run locally on an existing project 05 build and produced a valid image (header 16 MB, 80 MHz, DIO as in the build output). The workflow and the browser install itself are untested (status `builds`); first test: run the workflow by hand on a branch.
+
+### ADR-37: No certificate pinning for the Powerwall gateway
+
+- **Context.** The gateway serves a self-signed certificate, so `powerwall.cpp` connects with `setInsecure()`. The security review (2026-10-11) noted that someone on the home LAN could impersonate the gateway and collect the customer password.
+- **Decision.** Owner decision 2026-10-12: no pinning. An attacker would already need to be on the home network, and the customer login only reads data.
+- **Alternatives.** Trust on first use (store the certificate or key fingerprint with the setup config, reject others): protects the password, but a gateway firmware update that regenerates the certificate would stop the display until setup is run again.
+- **Consequences.** Keep the gateway on a trusted network segment; revisit if a write-capable login (TEDAPI) is ever added.
+- **Evidence.** `powerwall.cpp` (`setInsecure`), the cold security review.
 
 ---
 
