@@ -88,7 +88,7 @@ struct NetStatus {
     int rssi = 0;
 };
 
-// Starts Wi-Fi (WiFiMulti over WIFI_NETWORKS) and the network task on core 0: gateway polling plus
+// Starts Wi-Fi (WiFiMulti over cfg::get().wifi) and the network task on core 0: gateway polling plus
 // the background jobs (weather, sky, space, ENSO), one TLS session at a time.
 void powerwallStart(uint32_t pollMs = 2000);
 
@@ -102,4 +102,6 @@ uint32_t netTaskStackFree();
 // Turns a background job (by its table name: weather, aurora, kp, moon, swpc, sunimg, enso) on or off at run
 // time. A disabled job never runs, whatever its schedule says; when re-enabled (off -> on) it is made due at once
 // (the net task resets its schedule), so a long disable never delays it. Thread-safe (one atomic mask). False for an unknown name.
+// The user config can also hold a job off (auroraUk=false -> "aurora"); that is a second mask, ANDed in the job gate, so
+// netSetJobEnabled(.., true) never overrides it.
 bool netSetJobEnabled(const char *name, bool on);

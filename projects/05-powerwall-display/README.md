@@ -36,7 +36,7 @@ Screenshots are framebuffer captures from the board in privacy mode (placeholder
 
 ## Contents
 
-[What you need](#what-you-need) | [Set-up](#set-up) | [The screens](#the-screens) | [Data sources](#data-sources-and-refresh-intervals) | [SD card](#sd-card) | [Serial commands](#serial-commands) | [Screenshots](#screenshots) | [Troubleshooting](#troubleshooting) | [Limitations and notes](#limitations-and-notes) | [How it works](#how-it-works) | [Credits](#credits)
+[What you need](#what-you-need) | [Set-up](#set-up) | [The screens](#the-screens) | [Data sources](#data-sources-and-refresh-intervals) | [config.json](#configjson) | [SD card](#sd-card) | [Serial commands](#serial-commands) | [Screenshots](#screenshots) | [Troubleshooting](#troubleshooting) | [Limitations and notes](#limitations-and-notes) | [How it works](#how-it-works) | [Credits](#credits)
 
 ## What you need
 
@@ -58,7 +58,9 @@ This is a read-only login. The firmware only reads three endpoints and never cha
 
 Look in your router's DHCP client list for the Powerwall or gateway, then **give it a DHCP reservation** so the address does not change. The examples here use the documentation address `192.0.2.50`; yours will differ. If it is not in the list, it may be on another network segment (some home networks put IoT devices on a VLAN).
 
-### 3. Configure `src/secrets.h`
+### 3. Configure `src/secrets.h` (developer builds)
+
+End users set the Wi-Fi, gateway and location in the setup portal or with a `config.json` on the SD card (see [config.json](#configjson)). `secrets.h` is now an optional developer default, used only when nothing is stored.
 
 Copy `src/secrets.example.h` to `src/secrets.h`. The file is git-ignored; never commit it.
 
@@ -147,6 +149,25 @@ All of this runs on one network task, one HTTPS session at a time. Failed backgr
 | `GET /api/system_status/grid_status` | `SystemGridConnected` or islanded, and the grid-services flag |
 
 No token gives 403 and an expired token gives 401; either way the display logs in again by itself. Sign conventions: grid above 0 is importing, battery above 0 is discharging.
+
+## config.json
+
+The display's settings (Wi-Fi, gateway, location) are stored in the chip's NVS (namespace `pwdisp`, one checked blob), written only when you save setup and never otherwise. Load order at boot: NVS, else a one-time import of `/powerwall/config.json` from the SD card (the file is then renamed to `config.imported.json`, so a typo'd file is not re-imported every boot; an invalid file is left in place and the reason is printed on the serial console, never the passwords), else the optional developer defaults in `src/secrets.h` (not saved), else the setup portal.
+
+```json
+{
+  "wifi": [ { "ssid": "MyNetwork", "password": "my-wifi-password" } ],
+  "powerwall": { "host": "192.0.2.50", "password": "XXXXX" },
+  "location": { "lat": 51.5072, "lon": -0.1276, "name": "London", "tz": "GMT0BST,M3.5.0/1,M10.5.0" },
+  "auroraUk": true
+}
+```
+
+- `wifi`: 1 to 3 networks (the strongest in range is joined). SSID 1 to 32 bytes; password empty (open network), 8 to 63 characters, or 64 hex digits.
+- `powerwall.host`: the gateway's IPv4 address or host name. `powerwall.password`: 1 to 32 characters (last 5 characters of the gateway sticker password).
+- `location`: `lat` -90 to 90, `lon` -180 to 180, `tz` a POSIX TZ string (1 to 63 characters), `name` at most 23 plain ASCII characters (other characters become `?`; the display font has none).
+- `auroraUk` (optional, default true): `false` switches the AuroraWatch UK job off.
+- Unknown keys are ignored. The setup portal's read-back uses the same schema with `"password":""` and a `"passwordSet":true` flag instead of the secrets.
 
 ## SD card
 

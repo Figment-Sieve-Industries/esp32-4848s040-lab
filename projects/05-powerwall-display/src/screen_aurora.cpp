@@ -14,7 +14,7 @@
 #include "sky.h"
 #include "powerwall.h"
 #include "moon_calc.h"
-#include "secrets.h"
+#include "config_store.h"
 
 namespace {
 
@@ -294,7 +294,7 @@ void update(bool force) {
     int dark = -1;
     const time_t now = time(nullptr);
     if (tu::clockValid(now)) {
-        dark = sunAltitudeDeg(now, static_cast<double>(WEATHER_LAT), static_cast<double>(WEATHER_LON)) < -12.0 ? 1 : 0;
+        dark = sunAltitudeDeg(now, static_cast<double>(cfg::get().lat), static_cast<double>(cfg::get().lon)) < -12.0 ? 1 : 0;
     }
     const int cloud = w.valid ? w.cloudPct : -1;
 

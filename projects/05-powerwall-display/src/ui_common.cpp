@@ -1,10 +1,11 @@
 #include "ui_common.h"
 #include "icons.h"
 #include "powerwall.h"
-#include "secrets.h" // WEATHER_NAME (placeName)
+#include "config_store.h"
 #include "settings_codec.h"
 #include <Arduino.h>
 #include <src/core/lv_global.h> // private: anim list access for pauseScreenAnimations
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -190,7 +191,15 @@ TopBar topBarCreate(lv_obj_t *scr) {
 static bool s_privacy;
 void setPrivacy(bool on) { s_privacy = on; }
 bool privacy() { return s_privacy; }
-const char *placeName() { return s_privacy ? "MY TOWN" : WEATHER_NAME; }
+const char *placeName() {
+    if (s_privacy) return "MY TOWN";
+    static char upper[sizeof(cfg::Config::placeName)]; // UI thread only; the config does not change while running
+    const char *src = cfg::get().placeName;
+    size_t i = 0;
+    for (; src[i] && i + 1 < sizeof upper; i++) upper[i] = static_cast<char>(toupper(static_cast<unsigned char>(src[i])));
+    upper[i] = '\0';
+    return upper;
+}
 
 void topBarUpdate(TopBar &tb) {
     char buf[64];
