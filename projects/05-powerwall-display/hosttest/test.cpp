@@ -18,6 +18,7 @@
 #include "../src/backlight_curve.h"
 #include "../src/day_history_calc.h"
 #include "../src/settings_codec.h"
+#include "../src/gw_discover_calc.h"
 #include "../src/net_body.h"
 #include "../src/time_util.cpp"
 #define ENSO_HOST_TEST 1
@@ -1149,6 +1150,60 @@ static void testDayHistoryMergeRetry() {
     CHECK(!g.blocked(6));
 }
 
+static void testGwDiscover() {
+    using namespace gwdisc;
+    uint32_t ip = 0;
+    CHECK(parseIPv4("192.168.1.20", ip) && ip == 0xC0A80114u);
+    CHECK(!parseIPv4("192.168.1", ip) && !parseIPv4("192.168.1.256", ip) && !parseIPv4("1.2.3.4x", ip));
+    CHECK(!parseIPv4("", ip) && !parseIPv4(nullptr, ip) && !parseIPv4("1..2.3", ip) && !parseIPv4("1.2.3.4.5", ip));
+    char buf[16];
+    formatIPv4(0x0A000102u, buf, sizeof(buf));
+    CHECK_EQ_STR(buf, "10.0.1.2");
+    uint32_t a;
+    CHECK(parseIPv4("10.1.2.3", a) && isPrivate(a));
+    CHECK(parseIPv4("172.16.0.1", a) && isPrivate(a) && parseIPv4("172.31.255.1", a) && isPrivate(a));
+    CHECK(parseIPv4("172.15.0.1", a) && !isPrivate(a) && parseIPv4("172.32.0.1", a) && !isPrivate(a));
+    CHECK(parseIPv4("192.168.0.9", a) && isPrivate(a) && parseIPv4("192.169.0.9", a) && !isPrivate(a));
+    CHECK(parseIPv4("8.8.8.8", a) && !isPrivate(a) && parseIPv4("169.254.1.1", a) && !isPrivate(a));
+    uint32_t hosts[254];
+    parseIPv4("192.168.7.42", a);
+    int n = enumerate24(a, hosts, 254);
+    CHECK(n == 253 && hosts[0] == 0xC0A80701u && hosts[n - 1] == 0xC0A807FEu);
+    bool hasSelf = false;
+    for (int i = 0; i < n; i++) hasSelf |= hosts[i] == a;
+    CHECK(!hasSelf);
+    CHECK(enumerate24(a, hosts, 10) == 10);
+    parseIPv4("8.8.8.8", a);
+    CHECK(enumerate24(a, hosts, 254) == 0);
+    // scoring
+    Probe none, st, soe, root;
+    CHECK(score(none, none, none) == 0);
+    st.code = 200;
+    st.body = "{\"din\":\"1234\",\"start_time\":\"x\",\"up_time_seconds\":\"1h\",\"device_type\":\"teg\"}";
+    CHECK(isStatusDoc(st) && score(st, none, none) >= ACCEPT_SCORE);
+    st.body = "{\"din\":\"1234\"}"; // din alone is not enough
+    CHECK(score(st, none, none) < ACCEPT_SCORE);
+    st.code = 403;
+    st.body = "{\"error\":\"Unauthorized\"}";
+    soe.code = 403;
+    soe.body = "{\"error\":\"Unauthorized\"}";
+    CHECK(score(st, soe, none) >= ACCEPT_SCORE);
+    CHECK(score(st, none, none) < ACCEPT_SCORE && score(none, soe, none) < ACCEPT_SCORE);
+    st.code = 404;
+    st.body = "<html>Not found</html>";
+    soe.code = 404;
+    CHECK(score(st, soe, none) == 0);
+    root.code = 200;
+    root.body = "<title>Tesla Powerwall</title>";
+    CHECK(score(none, none, root) < ACCEPT_SCORE);
+    soe.code = 401;
+    soe.body = " {\"x\":1}";
+    CHECK(score(none, soe, root) >= ACCEPT_SCORE);
+    soe.body = "<html>login</html>"; // HTML 401 from a generic server is not the gateway's JSON
+    CHECK(score(none, soe, root) < ACCEPT_SCORE);
+    CHECK(containsI("Hello TESLA", "tesla") && !containsI("abc", "") && !containsI(nullptr, "a"));
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
@@ -1161,6 +1216,7 @@ int main(int argc, char **argv) {
     testSettingsCodec();
     testDayHistoryCalc();
     testDayHistoryMergeRetry();
+    testGwDiscover();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }
