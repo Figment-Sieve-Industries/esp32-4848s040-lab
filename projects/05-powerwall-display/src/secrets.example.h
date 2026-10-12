@@ -1,4 +1,7 @@
-// Copy to secrets.h (git-ignored) and fill in.
+// OPTIONAL developer defaults. End users configure Wi-Fi, gateway and location in the setup portal (or with a
+// /powerwall/config.json on the SD card, see the project README); this file is only used when nothing is stored in
+// NVS and no config.json is imported, and it is never written to NVS. Copy to secrets.h (git-ignored) and fill in.
+// At most 3 networks are used.
 #pragma once
 
 struct WifiCred {

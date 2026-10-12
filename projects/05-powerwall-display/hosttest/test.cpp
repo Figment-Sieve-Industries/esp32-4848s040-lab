@@ -16,6 +16,7 @@
 #endif
 
 #include "../src/backlight_curve.h"
+#include "../src/config_validate.h"
 #include "../src/day_history_calc.h"
 #include "../src/settings_codec.h"
 #include "../src/gw_discover_calc.h"
@@ -1215,6 +1216,240 @@ static void testGwDiscover() {
     CHECK(score(pw3Status, pw3Soe, pw3Root) == 0);
 }
 
+// ---- user config (config_validate.h) ----------------------------------------------------------------
+static const char *GOOD_JSON =
+    "{\"wifi\":[{\"ssid\":\"HomeNet\",\"password\":\"hunter2hunter2\"},{\"ssid\":\"Open\",\"password\":\"\"}],"
+    "\"powerwall\":{\"host\":\"192.0.2.10\",\"password\":\"AB12C\"},"
+    "\"location\":{\"lat\":51.5072,\"lon\":-0.1276,\"name\":\"Testville\",\"tz\":\"GMT0BST,M3.5.0/1,M10.5.0\"},"
+    "\"auroraUk\":false}";
+
+static cfg::Config goodCfg() {
+    cfg::Config c;
+    memset(&c, 0, sizeof c);
+    c.wifiCount = 1;
+    strcpy(c.wifi[0].ssid, "HomeNet");
+    strcpy(c.wifi[0].pass, "hunter2hunter2");
+    strcpy(c.pwHost, "192.0.2.10");
+    strcpy(c.pwPassword, "AB12C");
+    c.lat = 51.5f;
+    c.lon = -0.12f;
+    strcpy(c.placeName, "Testville");
+    strcpy(c.tz, "GMT0BST,M3.5.0/1,M10.5.0");
+    c.auroraUk = true;
+    return c;
+}
+
+static bool parses(const std::string &j, cfg::Config *out = nullptr, std::string *why = nullptr) {
+    cfg::Config c;
+    char w[65] = "";
+    const bool ok = cfgv::parseJson(j.c_str(), j.size(), c, w, sizeof w);
+    if (out && ok) *out = c;
+    if (why) *why = w;
+    return ok;
+}
+
+static std::string replaceOnce(std::string s, const std::string &a, const std::string &b) {
+    const size_t i = s.find(a);
+    if (i != std::string::npos) s.replace(i, a.size(), b);
+    return s;
+}
+
+static void testConfig() {
+    char why[65];
+    cfg::Config c = goodCfg();
+    CHECK(cfgv::validate(c, why, sizeof why));
+
+    // each invalid field
+    cfg::Config b = c;
+    b.wifiCount = 0;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.wifiCount = 4;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.wifi[0].ssid[0] = 0;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    memset(b.wifi[0].ssid, 'a', 32);
+    b.wifi[0].ssid[32] = 0;
+    CHECK(cfgv::validate(b, why, sizeof why)); // 32 bytes is the maximum
+    memset(b.wifi[0].ssid, 'a', 33); // no NUL
+    CHECK(!cfgv::validate(b, why, sizeof why));
+
+    // Wi-Fi password rules: empty ok, 7 bad, 8 ok, 63 ok, 64 non-hex bad, 64 hex ok
+    auto passOk = [&](const std::string &p) {
+        cfg::Config x = c;
+        strncpy(x.wifi[0].pass, p.c_str(), sizeof x.wifi[0].pass - 1);
+        return cfgv::validate(x, why, sizeof why);
+    };
+    CHECK(passOk(""));
+    CHECK(!passOk(std::string(7, 'x')));
+    CHECK(passOk(std::string(8, 'x')));
+    CHECK(passOk(std::string(63, 'x')));
+    CHECK(!passOk(std::string(64, 'x')));
+    CHECK(passOk(std::string(64, 'a')));
+    CHECK(passOk(std::string(32, 'A') + std::string(32, '0')));
+
+    // gateway host
+    auto hostOk = [&](const char *h) {
+        cfg::Config x = c;
+        strncpy(x.pwHost, h, sizeof x.pwHost - 1);
+        return cfgv::validate(x, why, sizeof why);
+    };
+    CHECK(hostOk("192.0.2.10") && hostOk("powerwall.lan") && hostOk("gw-1"));
+    CHECK(!hostOk("") && !hostOk("256.1.1.1") && !hostOk("1.2.3") && !hostOk("1.2.3.4.5") && !hostOk("a b") &&
+          !hostOk("-x") && !hostOk("a..b") && !hostOk("http://x") && !hostOk("1.2.3.4/"));
+    {
+        cfg::Config x = c;
+        memset(x.pwHost, 'a', 63); // 63 chars ok
+        x.pwHost[63] = 0;
+        CHECK(cfgv::validate(x, why, sizeof why));
+        memset(x.pwHost, 'a', 64); // unterminated
+        CHECK(!cfgv::validate(x, why, sizeof why));
+    }
+
+    // gateway password 1..32
+    b = c;
+    b.pwPassword[0] = 0;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    memset(b.pwPassword, 'p', 32);
+    b.pwPassword[32] = 0;
+    CHECK(cfgv::validate(b, why, sizeof why));
+    memset(b.pwPassword, 'p', 33);
+    CHECK(!cfgv::validate(b, why, sizeof why));
+
+    // lat / lon / tz / name
+    b = c;
+    b.lat = 90.0f;
+    b.lon = -180.0f;
+    CHECK(cfgv::validate(b, why, sizeof why));
+    b.lat = 90.1f;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.lon = 180.5f;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.lat = NAN;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.tz[0] = 0;
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    memset(b.tz, 'T', 63);
+    b.tz[63] = 0;
+    CHECK(cfgv::validate(b, why, sizeof why));
+    memset(b.tz, 'T', 64);
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    b.placeName[0] = 0;
+    CHECK(cfgv::validate(b, why, sizeof why)); // name optional
+    memset(b.placeName, 'N', 23);
+    b.placeName[23] = 0;
+    CHECK(cfgv::validate(b, why, sizeof why));
+    memset(b.placeName, 'N', 24);
+    CHECK(!cfgv::validate(b, why, sizeof why));
+    b = c;
+    strcpy(b.placeName, "Z\xC3\xBCrich");
+    CHECK(!cfgv::validate(b, why, sizeof why)); // save() rejects non-ASCII
+
+    // JSON: valid file
+    cfg::Config p;
+    CHECK(parses(GOOD_JSON, &p));
+    CHECK(p.wifiCount == 2);
+    CHECK_EQ_STR(p.wifi[0].ssid, "HomeNet");
+    CHECK_EQ_STR(p.wifi[1].ssid, "Open");
+    CHECK_EQ_STR(p.wifi[1].pass, "");
+    CHECK_EQ_STR(p.pwHost, "192.0.2.10");
+    CHECK_EQ_STR(p.pwPassword, "AB12C");
+    CHECK(fabsf(p.lat - 51.5072f) < 1e-4f && fabsf(p.lon + 0.1276f) < 1e-4f);
+    CHECK_EQ_STR(p.placeName, "Testville");
+    CHECK(!p.auroraUk);
+    // auroraUk defaults to true; unknown keys, BOM, whitespace and escapes are fine
+    std::string noAurora = replaceOnce(GOOD_JSON, ",\"auroraUk\":false", "");
+    CHECK(parses(noAurora, &p) && p.auroraUk);
+    CHECK(parses(" \n" + replaceOnce(GOOD_JSON, "\"auroraUk\"", "\"extra\":{\"x\":[1,2,{\"y\":null}]},\"auroraUk\""), &p));
+    CHECK(parses("\xEF\xBB\xBF" + std::string(GOOD_JSON), &p));
+    CHECK(parses(replaceOnce(GOOD_JSON, "HomeNet", "Home\\\"Net\\u0041"), &p));
+    CHECK_EQ_STR(p.wifi[0].ssid, "Home\"NetA");
+
+    // JSON: each failure, and the reason never contains a secret
+    std::string why2;
+    const char *secret = "hunter2hunter2";
+    CHECK(!parses(replaceOnce(GOOD_JSON, "hunter2hunter2", "short"), nullptr, &why2));
+    CHECK(why2.find("short") == std::string::npos);
+    CHECK(!parses(replaceOnce(GOOD_JSON, "AB12C", ""), nullptr, &why2));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "192.0.2.10", "999.0.2.10")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "51.5072", "95")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "-0.1276", "200")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"lat\":51.5072,", "")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"tz\":\"GMT0BST,M3.5.0/1,M10.5.0\"", "\"tz\":\"\"")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"powerwall\":{\"host\":\"192.0.2.10\",", "\"powerwall\":{")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"wifi\"", "\"wifx\"")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"auroraUk\":false", "\"auroraUk\":1")));
+    CHECK(!parses(std::string(GOOD_JSON) + "x"));
+    CHECK(!parses(std::string(GOOD_JSON).substr(0, 60)));
+    CHECK(!parses("") && !parses("[]") && !parses("{"));
+    {
+        std::string four = "{\"wifi\":[";
+        for (int i = 0; i < 4; i++) four += std::string(i ? "," : "") + "{\"ssid\":\"n\",\"password\":\"\"}";
+        four += std::string(GOOD_JSON).substr(std::string(GOOD_JSON).find("],\"powerwall\""));
+        CHECK(!parses(four, nullptr, &why2));
+        CHECK(why2.find("3") != std::string::npos);
+        CHECK(parses(replaceOnce(four, ",{\"ssid\":\"n\",\"password\":\"\"}", ""), &p) && p.wifiCount == 3);
+    }
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"HomeNet\"", "\"" + std::string(33, 'a') + "\"")));
+    CHECK(!parses(replaceOnce(GOOD_JSON, "\"HomeNet\"", "\"\""))); // empty SSID
+
+    // non-ASCII place name: replaced with '?' (one per character), then length-checked
+    CHECK(parses(replaceOnce(GOOD_JSON, "Testville", "Z\xC3\xBCrich"), &p));
+    CHECK_EQ_STR(p.placeName, "Z?rich");
+    CHECK(parses(replaceOnce(GOOD_JSON, "Testville", "Z\\u00fcrich \\u65e5\\u672c"), &p));
+    CHECK_EQ_STR(p.placeName, "Z?rich ??");
+    CHECK(!parses(replaceOnce(GOOD_JSON, "Testville", std::string(24, 'N'))));
+    CHECK(parses(replaceOnce(GOOD_JSON, "Testville", std::string(23, 'N')), &p));
+
+    // JSON round trip with secrets, and without
+    cfg::Config rt;
+    CHECK(parses(GOOD_JSON, &rt));
+    char buf[1024];
+    size_t n = cfgv::writeJson(rt, true, buf, sizeof buf);
+    CHECK(n > 0 && n == strlen(buf));
+    cfg::Config rt2;
+    CHECK(parses(buf, &rt2));
+    cfg::Config ca, cb;
+    cfgv::canonical(rt, ca);
+    cfgv::canonical(rt2, cb);
+    CHECK(memcmp(&ca, &cb, sizeof ca) == 0);
+
+    n = cfgv::writeJson(rt, false, buf, sizeof buf);
+    CHECK(n > 0);
+    CHECK(std::string(buf).find(secret) == std::string::npos);
+    CHECK(std::string(buf).find("AB12C") == std::string::npos);
+    CHECK(std::string(buf).find("\"passwordSet\":true") != std::string::npos);
+    CHECK(std::string(buf).find("\"passwordSet\":false") != std::string::npos); // the open network
+    CHECK(std::string(buf).find("\"password\":\"\"") != std::string::npos);
+    CHECK(std::string(buf).find("HomeNet") != std::string::npos);
+    CHECK(cfgv::writeJson(rt, true, buf, 20) == 0 && buf[0] == '\0'); // too small: empty, not truncated JSON
+    // escaping survives a round trip
+    cfg::Config esc = goodCfg();
+    strcpy(esc.wifi[0].ssid, "a\"b\\c");
+    n = cfgv::writeJson(esc, true, buf, sizeof buf);
+    CHECK(parses(buf, &rt2));
+    CHECK_EQ_STR(rt2.wifi[0].ssid, "a\"b\\c");
+
+    // canonical form + CRC: equal configs are byte-identical even with different garbage after the NUL
+    cfg::Config g1 = goodCfg(), g2 = goodCfg();
+    memset(g2.placeName + 10, 'Z', 5);
+    cfgv::canonical(g1, ca);
+    cfgv::canonical(g2, cb);
+    CHECK(memcmp(&ca, &cb, sizeof ca) == 0);
+    CHECK(cfgv::crc32(&ca, sizeof ca) == cfgv::crc32(&cb, sizeof cb));
+    g2.lat = 1.0f;
+    cfgv::canonical(g2, cb);
+    CHECK(cfgv::crc32(&ca, sizeof ca) != cfgv::crc32(&cb, sizeof cb));
+    CHECK(cfgv::crc32("123456789", 9) == 0xCBF43926u); // standard check value
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) g_dataDir = std::string(argv[1]) + "/";
     testDechunker();
@@ -1228,6 +1463,7 @@ int main(int argc, char **argv) {
     testDayHistoryCalc();
     testDayHistoryMergeRetry();
     testGwDiscover();
+    testConfig();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }
