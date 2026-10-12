@@ -22,3 +22,8 @@ bool setupRequested(board4848::Touch *touch);
 // Runs the setup portal until the user saves; then restarts. Never returns. Call before the dashboard screens are
 // created and before powerwallStart() (it owns Wi-Fi while it runs).
 [[noreturn]] void setupPortalRun();
+
+// Makes the next setupRequested() return true once (an RTC-memory flag, survives ESP.restart() but not a power
+// cut). Used by Settings > "Re-run setup" before it restarts, so setup runs even when the config comes from
+// secrets.h and cfg::clear() has nothing to forget.
+void setupRequestOnNextBoot();

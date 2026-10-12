@@ -60,6 +60,8 @@ static std::string slurp(const char *name) {
     return s;
 }
 
+#include "test_setup.inc"
+
 // ---- de-chunker ---------------------------------------------------------------------------------
 
 struct DcResult {
@@ -1161,6 +1163,8 @@ int main(int argc, char **argv) {
     testSettingsCodec();
     testDayHistoryCalc();
     testDayHistoryMergeRetry();
+    testSetupTz();
+    testSetupUtil();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;
 }

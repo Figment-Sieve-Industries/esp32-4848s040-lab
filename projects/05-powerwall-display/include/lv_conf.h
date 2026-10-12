@@ -41,6 +41,10 @@
 // TJpgDec (bundled): space.cpp decodes the SOHO sun JPEG with its raw jd_prepare/jd_decomp API
 #define LV_USE_TJPGD 1
 
+// QR code widget for the setup portal's "join this Wi-Fi" code (setup_screen.cpp). Its canvas (1 bit per pixel,
+// ~3 KB at 152 px) and the encoder's temporary buffers come from the LVGL pool in PSRAM; only exists in setup mode.
+#define LV_USE_QRCODE 1
+
 #define LV_BUILD_EXAMPLES 0
 
 #endif
