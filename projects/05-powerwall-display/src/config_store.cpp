@@ -9,7 +9,9 @@
 #include <SD.h>
 #include <sd_store.h>
 
-#if __has_include("secrets.h")
+// CFG_NO_SECRETS (set by release.yml) ignores secrets.h, so a prebuilt image has no defaults and opens setup on
+// first boot instead of booting "configured" with placeholder values.
+#if __has_include("secrets.h") && !defined(CFG_NO_SECRETS)
 #include "secrets.h"
 #define CFG_HAVE_SECRETS 1
 #endif

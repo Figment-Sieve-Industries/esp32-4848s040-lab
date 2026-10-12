@@ -13,7 +13,7 @@ A wall-mounted energy monitor for **Tesla Powerwall 3** owners. The ESP32 talks 
 
 **Own a Powerwall 3 and want one?** Start with **[Getting started: run the Powerwall 3 display on your own board](docs/getting-started-powerwall.md)**: shopping list, finding your gateway, setup, flashing and troubleshooting.
 
-**Just want to try it?** Flash prebuilt firmware from your browser (Chrome or Edge): **[flasher page](https://figment-sieve-industries.github.io/esp32-4848s040-lab/)**. The demo projects work as they are; the Powerwall image cannot join your Wi-Fi until on-device setup ships, so for live data build from source (see the guide above).
+**Just want to try it?** Flash prebuilt firmware from your browser (Chrome or Edge): **[flasher page](https://figment-sieve-industries.github.io/esp32-4848s040-lab/)**. The demo projects work as they are; the Powerwall image opens a setup hotspot on first boot, and you enter your Wi-Fi, gateway and town from your phone.
 
 <table>
   <tr>

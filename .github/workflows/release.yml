@@ -5,8 +5,8 @@
 # - On workflow_dispatch: builds and uploads the site as a workflow artifact so it can be inspected;
 #   tick "deploy_pages" to also deploy it (Pages deployments from a branch need the environment rule in docs/flash/README.md).
 #
-# Project 05 is built from src/secrets.example.h (placeholders): the image cannot join a real Wi-Fi network
-# until the on-device setup portal exists. Nothing secret is ever in these images.
+# Project 05 is built with -DCFG_NO_SECRETS and no secrets.h: the image has no Wi-Fi or gateway defaults and opens
+# the on-device setup portal on first boot (ADR-39). Nothing secret is ever in these images.
 # Why Pages and not the release assets as the flasher's source: ADR-36 in docs/guide/04-patterns-and-decisions.md.
 name: Release
 
@@ -51,11 +51,10 @@ jobs:
       - name: Install PlatformIO Core 6.1.18 and esptool 5.0.2
         # esptool 5.0.2 is the version the pinned pioarduino platform bundles; it is only used for merge_bin here.
         run: pip install "platformio==6.1.18" "esptool==5.0.2"
-      - name: Placeholder secrets (project 05 and any other that has an example file)
-        run: |
-          d="projects/${{ matrix.dir }}/src"
-          if [ -f "$d/secrets.example.h" ] && [ ! -f "$d/secrets.h" ]; then cp "$d/secrets.example.h" "$d/secrets.h"; fi
       - name: Build
+        # No secrets.h: project 05 starts the setup portal on first boot (config_store.cpp, CFG_NO_SECRETS).
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DCFG_NO_SECRETS
         run: pio run -d "projects/${{ matrix.dir }}"
       - name: Version
         id: ver

@@ -2,7 +2,7 @@
 
 Run a live Tesla Powerwall 3 dashboard on a cheap 4" touch screen (Guition ESP32-4848S040), read straight from your own gateway over your home network. This page walks you from "I own a Powerwall" to "it is on my wall".
 
-You build and flash the firmware with PlatformIO, then enter your settings from your phone: on first boot the display opens its own Wi-Fi hotspot and a setup page ([section 5](#5-configure)). Typing the settings into a `secrets.h` file before building still works and is meant for developers. The setup portal builds and is host-tested but has not yet been tested on hardware.
+You build and flash the firmware with PlatformIO, then enter your settings from your phone: on first boot the display opens its own Wi-Fi hotspot and a setup page ([section 5](#5-configure)). Typing the settings into a `secrets.h` file before building still works and is meant for developers. The setup portal works on hardware (tested on the maintainer's display, 2026-10-12).
 
 Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 Before you start: about your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [Flash from the browser](#flash-from-the-browser-prebuilt) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
 
@@ -216,11 +216,11 @@ More: the full symptom table is in the [debugging playbook](guide/02-debugging-p
 
 A prebuilt image can be installed from Chrome or Edge on a desktop computer, with no PlatformIO: open <https://figment-sieve-industries.github.io/esp32-4848s040-lab/>, plug the board in with a USB-C data cable and press the install button. Back up the factory firmware first ([section 6](#6-back-up-the-factory-firmware-first)).
 
-**Until on-device setup ships, prebuilt firmware can't join your Wi-Fi.** The prebuilt Powerwall image is built with the placeholder `secrets.example.h`, so it boots and shows the screens but stays offline ("--"). To get live data, build from source with your own `secrets.h` ([section 5](#5-configure) and [section 7](#7-build-and-flash-first-boot)). The simple demo projects (01, 02, 03) need no settings and work from the browser as they are. The page, images and release process are described in [ADR-36](guide/04-patterns-and-decisions.md#adr-36-release-pipeline-and-browser-flashing).
+The prebuilt Powerwall image has no settings built in: on first boot it opens the setup hotspot, and you enter everything from your phone ([section 5](#5-configure)). No build needed. The simple demo projects (01, 02, 03) need no settings and work from the browser as they are. The page, images and release process are described in [ADR-36](guide/04-patterns-and-decisions.md#adr-36-release-pipeline-and-browser-flashing).
 
 ## 9. Coming soon
 
-On-device setup (the phone setup page, [section 5](#5-configure)) and gateway discovery (Find it) are in the firmware and waiting for a hardware test. Planned next, with no dates promised: a prebuilt browser-flash image that uses the setup page, so no build is needed at all.
+Gateway discovery (Find it on the setup page) recognises a Powerwall 3 on unit 1, but it scans only the display's own /24 network, so a gateway on another subnet must be typed in. Planned, with no dates promised: OTA updates, so a wall-mounted display can be updated without USB.
 
 ## 10. Getting help and contributing
 

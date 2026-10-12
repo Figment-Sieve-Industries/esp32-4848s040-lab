@@ -28,6 +28,8 @@ What has been verified on real units. Add an entry each time something is tested
 | Panel drift (2026-10-11) | Image shifted sideways once during a soak, cleared by a reboot; framebuffer was correct. 60 forced SD saves did not reproduce it. Open: guide 03 `inv-panel-drift` |
 | Review fixes (2026-10-11) | On unit 1 over serial: `c` replies at once and the SD task prints the cache list; history month view stops at -24 (October 2024) with `#err not possible`; day store restored today's bins from the card after a reboot ("rtc restored", 22 hours); navigation skips a disabled screen; SD task stack free 2.6 KB of 6 KB. Owner, 2026-10-12: swiping right after the brightness slider is fine. Not yet checked: 03 launcher after a power cycle |
 | Panel drift diagnostics (2026-10-11) | D-21 phase monitor on unit 1: 42 vsyncs/s, VSYNC to last refill 21.41 ms, jitter up to ~0.72 ms per 10 s window (refill deadline ~0.91 ms). No drift in ~2 h 20 min of captures since the monitor went in (three drifts in the ~1.5 h before it) |
+| Setup portal (05, 2026-10-12) | Settings > Re-run setup on unit 1, run end to end from the owner's phone (hotspot, page, Wi-Fi, gateway login test, town lookup, save): "looks good". Next boot: `config: source NVS`; first gateway login refused, retry after 30 s OK, live data. Internal free ~130 KB afterwards |
+| Gateway discovery (05, 2026-10-12) | Probe of unit 1's Powerwall 3 (firmware 26.26.4): `/api/status` 404, `/api/system_status/soe` 403 JSON, `/` 404, accepted by the PW3 rule (score 2). The /24 scan cannot find it here because the gateway is on another subnet |
 | Not yet tested | Corner accuracy, backlight cut-out below 100, audio, relays, battery |
 
 ### LVGL benchmark, unit 1 (2026-10-10)
