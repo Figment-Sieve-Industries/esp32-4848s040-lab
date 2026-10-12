@@ -111,6 +111,10 @@ inline int score(const Probe &status, const Probe &soe, const Probe &root) {
     if (isStatusDoc(status)) s += 3;
     else if (isAuthJson(status)) s += 1;
     if (isAuthJson(soe)) s += 1;
+    // Verified on unit 1's Powerwall 3 (firmware 26.26.4 basic LAN API, 2026-10-12): /api/status 404,
+    // /api/system_status/soe 403 with a JSON body, / 404. "status 404 + soe auth-JSON" is that gateway's pattern:
+    // a generic HTTPS server doesn't answer a Tesla API path with an auth error, so it counts as a second signal.
+    if (status.code == 404 && isAuthJson(soe)) s += 1;
     if (mentionsTesla(root)) s += 1;
     return s;
 }

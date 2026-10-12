@@ -1202,6 +1202,17 @@ static void testGwDiscover() {
     soe.body = "<html>login</html>"; // HTML 401 from a generic server is not the gateway's JSON
     CHECK(score(none, soe, root) < ACCEPT_SCORE);
     CHECK(containsI("Hello TESLA", "tesla") && !containsI("abc", "") && !containsI(nullptr, "a"));
+    // Powerwall 3, firmware 26.26.4 basic LAN API: status codes as seen on unit 1 (404 / 403 JSON / 404); the body
+    // text below is illustrative, only its JSON shape matters
+    Probe pw3Status, pw3Soe, pw3Root;
+    pw3Status.code = 404;
+    pw3Status.body = "";
+    pw3Soe.code = 403;
+    pw3Soe.body = "{\"code\":403,\"error\":\"Unable to GET to resource\",\"message\":\"User does not have adequate access rights\"}";
+    pw3Root.code = 404;
+    CHECK(score(pw3Status, pw3Soe, pw3Root) >= ACCEPT_SCORE);
+    pw3Soe.code = 404; // a generic server: 404 everywhere
+    CHECK(score(pw3Status, pw3Soe, pw3Root) == 0);
 }
 
 int main(int argc, char **argv) {
