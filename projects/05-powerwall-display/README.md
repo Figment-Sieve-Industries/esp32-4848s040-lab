@@ -36,7 +36,7 @@ Screenshots are framebuffer captures from the board in privacy mode (placeholder
 
 ## Contents
 
-[What you need](#what-you-need) | [Set-up](#set-up) | [The screens](#the-screens) | [Data sources](#data-sources-and-refresh-intervals) | [config.json](#configjson) | [SD card](#sd-card) | [Serial commands](#serial-commands) | [Screenshots](#screenshots) | [Troubleshooting](#troubleshooting) | [Limitations and notes](#limitations-and-notes) | [How it works](#how-it-works) | [Credits](#credits)
+[What you need](#what-you-need) | [Set-up](#set-up) ([first-boot setup](#setup-first-boot)) | [The screens](#the-screens) | [Data sources](#data-sources-and-refresh-intervals) | [config.json](#configjson) | [SD card](#sd-card) | [Serial commands](#serial-commands) | [Screenshots](#screenshots) | [Troubleshooting](#troubleshooting) | [Limitations and notes](#limitations-and-notes) | [How it works](#how-it-works) | [Credits](#credits)
 
 ## What you need
 
@@ -57,6 +57,23 @@ This is a read-only login. The firmware only reads three endpoints and never cha
 ### 2. Find the gateway's IP address
 
 Look in your router's DHCP client list for the Powerwall or gateway, then **give it a DHCP reservation** so the address does not change. The examples here use the documentation address `192.0.2.50`; yours will differ. If it is not in the list, it may be on another network segment (some home networks put IoT devices on a VLAN).
+
+### Setup (first boot)
+
+Status: **builds**, host-tested helpers; not yet tested on hardware.
+
+With no stored settings (and no `secrets.h` in the build) the display starts a setup portal instead of the dashboard:
+
+1. The screen shows a QR code and the name of an open hotspot, `PW-Display-XXXX` (the last 4 hex digits of the board's MAC address). Scan the code with the phone camera, or join that Wi-Fi by hand. No password.
+2. The phone should open the setup page by itself (captive portal: the display answers every DNS name with `192.168.4.1`). If not, open `http://192.168.4.1` in the browser.
+3. On the page: pick your **home Wi-Fi** (2.4 GHz) and press **Connect**. The display joins it and keeps the hotspot up. The hotspot then moves to your router's channel, so the phone may drop off the hotspot for a few seconds; it normally reconnects by itself (the display starts the hotspot on the strongest network's channel to make this rare).
+4. **Gateway**: press **Find it** (scans your /24 for a Powerwall gateway, [ADR-38](../../docs/guide/04-patterns-and-decisions.md#adr-38-gateway-discovery-by-24-scan-with-a-scored-login-free-fingerprint)) or type the address. A gateway on another network or VLAN is not found by the scan; type its address, the test checks it. Then enter the customer password (last 5 characters of the sticker password, [step 1](#1-the-gateway-password)).
+5. **Location**: type your town or postcode and press **Look up** (Open-Meteo geocoding, over the internet through your Wi-Fi). The time zone comes with it; if it is not in the device's table, choose one from the list. You can also enter latitude, longitude and time zone by hand. Tick **Show UK aurora alerts** for AuroraWatch UK (ticked automatically for places in the UK).
+6. Press **Test and save**. The display tests, in order, and shows each step on its screen and on the page: Wi-Fi joins, the gateway answers at that address, **one** login with the customer password, location and time zone present. Only if all pass are the settings written to NVS (the only flash write); then it restarts into the dashboard. A failure shows the step and the reason, and nothing is saved. After a rejected password the page makes you wait 20 s before the next test.
+
+To run setup again: **Settings > Setup > Re-run setup** (tap twice within 3 s; forgets the stored settings and restarts into the portal), or **hold the screen for 5 s while it powers on** (a countdown appears; let go to start normally; the stored settings stay until you save new ones, and empty password fields keep the stored passwords).
+
+Passwords are never sent back to the page and never printed on the serial console. The setup hotspot is open, so anyone nearby could load the page while setup runs; it ends at the restart.
 
 ### 3. Configure `src/secrets.h` (developer builds)
 

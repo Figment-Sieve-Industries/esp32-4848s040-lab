@@ -2,7 +2,7 @@
 
 Run a live Tesla Powerwall 3 dashboard on a cheap 4" touch screen (Guition ESP32-4848S040), read straight from your own gateway over your home network. This page walks you from "I own a Powerwall" to "it is on my wall".
 
-Today you set it up by building the firmware yourself with PlatformIO and typing your settings into a file. That is a developer-style path, but you do not need to write any code. See [Coming soon](#9-coming-soon) for what is planned to make it simpler.
+You build and flash the firmware with PlatformIO, then enter your settings from your phone: on first boot the display opens its own Wi-Fi hotspot and a setup page ([section 5](#5-configure)). Typing the settings into a `secrets.h` file before building still works and is meant for developers. The setup portal builds and is host-tested but has not yet been tested on hardware.
 
 Contents: [1 What you get](#1-what-you-get) | [2 Shopping list](#2-shopping-list) | [3 Before you start: about your Powerwall](#3-before-you-start-about-your-powerwall) | [4 Install the tools](#4-install-the-tools) | [5 Configure](#5-configure) | [6 Back up the factory firmware](#6-back-up-the-factory-firmware-first) | [7 Build, flash, first boot](#7-build-and-flash-first-boot) | [8 Troubleshooting](#8-troubleshooting) | [Flash from the browser](#flash-from-the-browser-prebuilt) | [9 Coming soon](#9-coming-soon) | [10 Help](#10-getting-help-and-contributing)
 
@@ -79,7 +79,24 @@ The first build downloads the toolchain and takes a while. Use the project's pin
 
 ## 5. Configure
 
-Your settings live in one file that is never committed to Git:
+### Recommended: the setup page on your phone
+
+Nothing to edit before building. After flashing ([section 7](#7-build-and-flash-first-boot)), a display with no stored settings starts in setup mode:
+
+1. The screen shows a QR code and a hotspot name `PW-Display-XXXX`. Scan the code with your phone camera, or join that Wi-Fi (it has no password).
+2. The setup page should open by itself. If it does not, open `http://192.168.4.1` in the phone's browser.
+3. **Home Wi-Fi:** choose your 2.4 GHz network, type its password and press Connect. While the display joins, the hotspot can change channel and your phone may drop off it for a few seconds; it normally rejoins by itself. If the page says it lost contact, join `PW-Display-XXXX` again.
+4. **Powerwall gateway:** press Find it, or type the gateway's address (see [3a](#3-before-you-start-about-your-powerwall)). Find it searches only the display's own network; a gateway on another network segment or VLAN must be typed in ([Q-PW-06](guide/01-quirks-and-gotchas.md#q-pw-06)). Then type the customer password ([3b](#3-before-you-start-about-your-powerwall)).
+5. **Location:** type your town or postcode and press Look up (Open-Meteo, over your internet connection), or enter latitude, longitude and time zone by hand. Tick "Show UK aurora alerts" if you live in the UK.
+6. Press **Test and save**. The display checks each step on its screen and on the page: it joins your Wi-Fi, checks that a gateway answers at that address, signs in **once** with your customer password, and checks the location and time zone. Only when everything passes are the settings saved (on the display's chip), and it restarts into the dashboard. If a step fails you see which one and why, and nothing is saved.
+
+To change the settings later: Settings screen > Setup > **Re-run setup** (tap it twice within 3 seconds), or hold your finger on the screen for 5 seconds while the display powers on.
+
+The settings are stored in the chip's NVS memory, written only when you save setup. Another way in, for many displays or no phone: a `config.json` file on the SD card ([project README](../projects/05-powerwall-display/README.md#configjson)).
+
+### For developers: `secrets.h`
+
+If a `secrets.h` file is present when you build, its values are used whenever nothing is stored on the display (they are not saved to NVS). Your settings then live in one file that is never committed to Git:
 
 ```
 copy projects\05-powerwall-display\src\secrets.example.h projects\05-powerwall-display\src\secrets.h      (Windows)
@@ -146,7 +163,7 @@ pio device monitor -d projects/05-powerwall-display
 
 **What you should see after flashing:** the upload ends with `SUCCESS`, the board restarts, the backlight comes on and the first screen appears within a few seconds; the serial monitor then prints boot lines and the heartbeat every 10 seconds.
 
-**First boot:** the screen lights up, joins Wi-Fi, sets the clock and starts polling the gateway. Expect the power-flow screen with live numbers within a few seconds to a minute. Swipe left/right to move between screens. Weather, moon, aurora, sun and El Nino screens fill in as each background fetch completes (some refresh only every 30 minutes to 12 hours). Rotation is set so the USB-C port is at the bottom.
+**First boot:** without stored settings (and without a `secrets.h` in the build) the display starts the setup portal; follow [section 5](#5-configure). Once set up, the screen lights up, joins Wi-Fi, sets the clock and starts polling the gateway. Expect the power-flow screen with live numbers within a few seconds to a minute. Swipe left/right to move between screens. Weather, moon, aurora, sun and El Nino screens fill in as each background fetch completes (some refresh only every 30 minutes to 12 hours). Rotation is set so the USB-C port is at the bottom.
 
 **Serial monitor** (115200 baud). Every 10 seconds a heartbeat prints live values, memory and network counters ([D-01](guide/02-debugging-playbook.md#d-01-serial-heartbeat)). The first line looks like this (Wi-Fi name and numbers are examples):
 
@@ -177,7 +194,7 @@ A subset of the serial commands (type one and press Enter; the full list is at t
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Never joins Wi-Fi; log says `no matching wifi found`; the firmware prints a scan of visible networks | The network is 5 GHz only, or out of range, or the name/password in `secrets.h` is wrong | Use a 2.4 GHz network (the ESP32-S3 cannot see 5 GHz). Check spelling and case. See [Q-NET-09](guide/01-quirks-and-gotchas.md#q-net-09) |
-| Screen says "login rejected - check password" (HTTP 401/403) | Wrong `PW_CUSTOMER_PASSWORD` (must be the last 5 characters of the QR-sticker gateway password) | Fix `secrets.h`, rebuild and flash. The firmware backs off 30 s up to 5 min between tries. Do not leave a wrong password running. See [Q-PW-02](guide/01-quirks-and-gotchas.md#q-pw-02) |
+| Screen says "login rejected - check password" (HTTP 401/403) | Wrong customer password (must be the last 5 characters of the QR-sticker gateway password) | Run setup again (Settings > Re-run setup) and enter it; with a developer build, fix `PW_CUSTOMER_PASSWORD` in `secrets.h` and reflash. The firmware backs off 30 s up to 5 min between tries. Do not leave a wrong password running. See [Q-PW-02](guide/01-quirks-and-gotchas.md#q-pw-02) |
 | Cannot reach the gateway at all (timeouts) | Wrong `PW_HOST`, the address changed, or the display's network cannot reach the gateway's VLAN | Check the IP in your router, add a DHCP reservation, allow routing between the networks. See [Q-PW-06](guide/01-quirks-and-gotchas.md#q-pw-06) |
 | Values show "--" or the screen says data is stale | The gateway did not answer in time, or a meter is missing; the firmware shows "--" rather than a false 0 | Wait a minute and watch the serial heartbeat. If persistent, check login and Wi-Fi signal. See [Q-PW-03](guide/01-quirks-and-gotchas.md#q-pw-03), [Q-NET-05](guide/01-quirks-and-gotchas.md#q-net-05) |
 | Powerwall works but weather / moon / aurora / sun / El Nino are empty | Clock not yet set, or a TLS failure | Wait a few minutes after boot (NTP first). Check Wi-Fi and internet access, and that `TZ_INFO` is valid. See [Q-NET-06](guide/01-quirks-and-gotchas.md#q-net-06) |
@@ -203,7 +220,7 @@ A prebuilt image can be installed from Chrome or Edge on a desktop computer, wit
 
 ## 9. Coming soon
 
-Planned, with no dates promised: on-device setup so you will not need to edit `secrets.h` (on first boot the display opens its own Wi-Fi hotspot and you enter your network, gateway and location from a phone setup page), a prebuilt image that works without a rebuild once setup lands (browser flashing itself is already there, see above), and automatic discovery of the gateway on your network.
+On-device setup (the phone setup page, [section 5](#5-configure)) and gateway discovery (Find it) are in the firmware and waiting for a hardware test. Planned next, with no dates promised: a prebuilt browser-flash image that uses the setup page, so no build is needed at all.
 
 ## 10. Getting help and contributing
 

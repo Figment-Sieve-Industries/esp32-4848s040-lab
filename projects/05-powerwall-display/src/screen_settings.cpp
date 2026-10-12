@@ -1,8 +1,11 @@
-// Settings screen (last page but one): backlight slider, switches for the optional screens, SD card summary.
+// Settings screen (last page but one): backlight slider, switches for the optional screens, SD card summary and
+// "Re-run setup" (second tap within 3 s confirms: forget the saved config, restart into the setup portal).
 #include "screens.h"
 #include "ui_common.h"
+#include "config_store.h"
 #include "history.h"
 #include "settings_codec.h"
+#include "setup_portal.h"
 #include <Arduino.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,8 +15,11 @@ namespace {
 constexpr int CARD_X = 12, CARD_W = 456, PAD = 14;
 constexpr int INNER_W = CARD_W - 2 * PAD;
 
-// Screens card grid: 2 columns of 44 px rows, 4 px apart
-constexpr int GRID_Y = 38, ROW_H = 44, ROW_GAP = 4, COL_GAP = 16;
+// Screens card grid: 2 columns of 40 px rows (each with a bottom rule)
+constexpr int GRID_Y = 36, ROW_H = 40, ROW_GAP = 0, COL_GAP = 16;
+// Bottom card: SD card row and setup row, 39 px each
+constexpr int INFO_ROW_H = 39;
+constexpr uint32_t CONFIRM_MS = 3000;
 constexpr int COL_W = (INNER_W - COL_GAP) / 2;
 
 struct Toggle {
@@ -36,6 +42,8 @@ struct ToggleUi {
 lv_obj_t *s_cards[3];
 lv_obj_t *s_slider, *s_lblPct;
 lv_obj_t *s_lblStatus, *s_lblSummary;
+lv_obj_t *s_setupBtn, *s_setupLbl;
+lv_timer_t *s_confirmTimer; // armed: a second tap within CONFIRM_MS re-runs setup
 ToggleUi s_tog[TOGGLE_COUNT];
 
 constexpr lv_style_selector_t SEL_IND_CHECKED = static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED;
@@ -113,6 +121,57 @@ void syncToggles() {
     }
 }
 
+void setupButtonIdle() {
+    ui::setText(s_setupLbl, "Re-run setup");
+    ui::setTextColor(s_setupLbl, ui::C_HOME);
+}
+
+void confirmExpired(lv_timer_t *) {
+    s_confirmTimer = nullptr; // one-shot: LVGL deletes it after this call
+    setupButtonIdle();
+}
+
+void restartCb(lv_timer_t *) { ESP.restart(); }
+
+void setupBtnCb(lv_event_t *) {
+    if (!s_confirmTimer) {
+        ui::setText(s_setupLbl, "Tap again to confirm");
+        ui::setTextColor(s_setupLbl, ui::C_ALERT);
+        s_confirmTimer = lv_timer_create(confirmExpired, CONFIRM_MS, nullptr);
+        lv_timer_set_repeat_count(s_confirmTimer, 1);
+        return;
+    }
+    lv_timer_delete(s_confirmTimer);
+    s_confirmTimer = nullptr;
+    ui::setText(s_setupLbl, "Restarting...");
+    ui::setTextColor(s_setupLbl, ui::MUTED);
+    lv_obj_remove_flag(s_setupBtn, LV_OBJ_FLAG_CLICKABLE);
+    // Forget the stored config (NVS) and force the portal on the next boot even if the config comes from secrets.h
+    const bool cleared = cfg::clear();
+    setupRequestOnNextBoot();
+    Serial.printf("Settings: re-run setup (stored config %s), restarting\n", cleared ? "cleared" : "not cleared");
+    lv_timer_t *t = lv_timer_create(restartCb, 400, nullptr); // let "Restarting..." reach the panel first
+    lv_timer_set_repeat_count(t, 1);
+}
+
+// One row of the bottom card: caption on the left, content after it
+lv_obj_t *infoRow(lv_obj_t *card, int y, const char *caption, bool rule) {
+    lv_obj_t *row = ui::box(card);
+    lv_obj_set_pos(row, 0, y);
+    lv_obj_set_size(row, CARD_W, INFO_ROW_H);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(row, PAD, 0);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    if (rule) {
+        lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_width(row, 1, 0);
+        lv_obj_set_style_border_color(row, ROW_LINE, 0);
+    }
+    ui::cardCaption(row, caption, 0, 0);
+    return row;
+}
+
 } // namespace
 
 lv_obj_t *settingsCreate() {
@@ -147,8 +206,8 @@ lv_obj_t *settingsCreate() {
     lv_obj_add_event_cb(s_slider, sliderCb, LV_EVENT_VALUE_CHANGED, nullptr);
     setPercent(lv_slider_get_value(s_slider));
 
-    // Screens card: y 158..394
-    s_cards[1] = ui::card(scr, CARD_X, 158, CARD_W, 236);
+    // Screens card: y 156..360
+    s_cards[1] = ui::card(scr, CARD_X, 156, CARD_W, 204);
     ui::cardCaption(s_cards[1], "SCREENS", PAD, 12);
     lv_obj_t *note = ui::label(s_cards[1], &lv_font_montserrat_12, ui::MUTED, "Off = hidden, no fetching");
     lv_obj_align(note, LV_ALIGN_TOP_RIGHT, -PAD, 12);
@@ -173,17 +232,33 @@ lv_obj_t *settingsCreate() {
     }
     syncToggles();
 
-    // SD card summary: y 402..446
-    s_cards[2] = ui::card(scr, CARD_X, 402, CARD_W, 44);
-    lv_obj_set_flex_flow(s_cards[2], LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_cards[2], LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(s_cards[2], PAD, 0);
-    lv_obj_set_style_pad_column(s_cards[2], 10, 0);
-    ui::cardCaption(s_cards[2], "SD CARD", 0, 0);
-    s_lblStatus = ui::label(s_cards[2], &lv_font_montserrat_14, ui::MUTED, "Checking...");
-    s_lblSummary = ui::label(s_cards[2], &lv_font_montserrat_14, ui::MUTED, "--");
+    // Bottom card: y 368..446, SD card summary row and setup row
+    s_cards[2] = ui::card(scr, CARD_X, 368, CARD_W, 2 * INFO_ROW_H);
+    lv_obj_t *sd = infoRow(s_cards[2], 0, "SD CARD", true);
+    s_lblStatus = ui::label(sd, &lv_font_montserrat_14, ui::MUTED, "Checking...");
+    s_lblSummary = ui::label(sd, &lv_font_montserrat_14, ui::MUTED, "--");
     lv_label_set_long_mode(s_lblSummary, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_flex_grow(s_lblSummary, 1);
+
+    lv_obj_t *setup = infoRow(s_cards[2], INFO_ROW_H, "SETUP", false);
+    lv_obj_t *what = ui::label(setup, &lv_font_montserrat_14, ui::MUTED, "Wi-Fi, gateway, location");
+    lv_label_set_long_mode(what, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_flex_grow(what, 1);
+    s_setupBtn = ui::box(setup);
+    lv_obj_set_size(s_setupBtn, 168, 30);
+    lv_obj_set_style_radius(s_setupBtn, 8, 0);
+    lv_obj_set_style_bg_color(s_setupBtn, ui::CARD_HI, 0);
+    lv_obj_set_style_bg_opa(s_setupBtn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_setupBtn, ui::TRACK, LV_STATE_PRESSED);
+    lv_obj_add_flag(s_setupBtn, LV_OBJ_FLAG_CLICKABLE);
+    // Like the switches: a tap must not turn pages or reach the screen's tap handler
+    lv_obj_remove_flag(s_setupBtn, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_remove_flag(s_setupBtn, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_ext_click_area(s_setupBtn, 7); // 30 + 14 = 44 px touch height
+    lv_obj_add_event_cb(s_setupBtn, setupBtnCb, LV_EVENT_CLICKED, nullptr);
+    s_setupLbl = ui::label(s_setupBtn, &lv_font_montserrat_14, ui::C_HOME, "");
+    lv_obj_center(s_setupLbl);
+    setupButtonIdle();
 
     return scr;
 }
